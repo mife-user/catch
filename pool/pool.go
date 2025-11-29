@@ -9,8 +9,9 @@ import (
 )
 
 type SearchTask struct {
-	FilePath string
-	KeyWord  string
+	FilePath   string
+	KeyWord    string
+	SearchType bool
 }
 type SearchResult struct {
 	FilePath string
@@ -29,13 +30,24 @@ type Pool struct {
 }
 
 func (w *worker) Search(st *SearchTask) []SearchResult {
+	var result []SearchResult
+	if st.SearchType {
+		if strings.Contains(st.FilePath, st.KeyWord) {
+			result = append(result, SearchResult{
+				FilePath: st.FilePath,
+				LinNum:   0, // 文件名匹配没有行号
+				Content:  "Matches Filename",
+			})
+		}
+		return result
+	}
 	file, err := os.Open(st.FilePath)
 	if err != nil {
 		fmt.Println("打开文件失败...")
 		return nil
 	}
 	defer file.Close()
-	var result []SearchResult
+
 	r := bufio.NewScanner(file)
 	line := 0
 	for r.Scan() {

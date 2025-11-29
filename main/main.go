@@ -1,14 +1,13 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"searching/pool"
 )
-
-var dir string
-var keyword string
 
 const (
 	poolnum  = 5
@@ -26,22 +25,25 @@ func startw() {
 }
 
 // 这段递归靠的ai，我尽量看懂先
-func WorkPush(filepatht string, keywordt string) {
+func WorkPush(filepatht string, keywordt string, isFileSearching bool) {
 	fmt.Println("开始递归搜索目录:", filepatht)
 	//这里应该用了递归，但我实在没看出来，可能是func这里，"path/filepath"主要是不知道这个包怎么用
-	err := filepath.Walk(filepatht, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(filepatht, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		//这个大概是找到了文件而不是目录，所以传入管道
-		if !info.IsDir() {
+		if info.IsDir() && !isFileSearching {
+			return nil
+		} else {
 			task := pool.SearchTask{
-				FilePath: path,
-				KeyWord:  keywordt,
+				FilePath:   path,
+				KeyWord:    keywordt,
+				SearchType: isFileSearching,
 			}
 			// 发送任务给 Worker
 			workers.TasksIn <- task
 		}
+
 		//没找到返回nil
 		return nil
 	})
@@ -59,31 +61,43 @@ func WorkPush(filepatht string, keywordt string) {
 // os.Args[1] = "./"
 // os.Args[2] = "func"
 // 这就是为什么我们要判断 len(os.Args) < 3，防止用户只输了命令没输参数导致数组越界 panic。
-func inputThing() (string, string) {
-	if len(os.Args) < 3 { //参数少了返回true，maybe
+func inputThing() (string, string, bool) {
+	var searchfile bool
+	flag.BoolVar(&searchfile, "v", false, "查找目录名")
+	flag.Usage = func() {
+		fmt.Println("使用方式: ./catch [-v] [目录] [关键词]")
+		fmt.Println("说明: -v 选项必须放在目录前面")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+	args := flag.Args()
+	if len(args) < 2 { //参数少了返回true，maybe
 		fmt.Println("使用方法错误！")
-		fmt.Println("正确格式: ./catch [目录] [关键词]")
-		fmt.Println("示例: ./catch ./src func")
+		fmt.Println("正确格式: ./catch [目录] [关键词] [模式]")
+		fmt.Println("示例: ./catch ./src func -v")
 		os.Exit(1)
 	}
-	//这里应该是通过os的Args方法返回输入的值
-	d := os.Args[1]
-	k := os.Args[2]
-	fmt.Printf("正在搜索目录: %s , 关键词: %s \n", d, k)
-	return d, k
+	d := args[0]
+	k := args[1]
+	if searchfile {
+		fmt.Printf("正在搜索目录：%s,关键词：%s\n", d, k)
+		return d, k, searchfile
+	}
+	fmt.Printf("正在搜索内容: %s , 关键词: %s \n", d, k)
+	return d, k, searchfile
 }
 func main() {
-	dir, keyword = inputThing()
+	dir, keyword, function := inputThing()
 	makew()
 	startw()
 	done := make(chan struct{})
 	go func() {
 		for to := range workers.TasksOut {
-			fmt.Printf("路径: %s , 行数: %d , 内容: %s\n", to.FilePath, to.LinNum, to.Content)
+			fmt.Printf("路径: %s\n , 行数: %d\n , 内容: %s\n", to.FilePath, to.LinNum, to.Content)
 		}
 		close(done)
 	}()
-	WorkPush(dir, keyword)
+	WorkPush(dir, keyword, function)
 	close(workers.TasksIn)
 	workers.Wg.Wait()
 	close(workers.TasksOut)
