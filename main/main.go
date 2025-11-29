@@ -3,9 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"searching/pool"
 )
 
@@ -14,53 +12,6 @@ const (
 	poolchan = 100
 )
 
-var workers *pool.Pool
-
-func makew() {
-	workers = pool.NewPool(poolnum, poolchan)
-}
-
-func startw() {
-	workers.Start()
-}
-
-// 这段递归靠的ai，我尽量看懂先
-func WorkPush(filepatht string, keywordt string, isFileSearching bool) {
-	fmt.Println("开始递归搜索目录:", filepatht)
-	//这里应该用了递归，但我实在没看出来，可能是func这里，"path/filepath"主要是不知道这个包怎么用
-	err := filepath.WalkDir(filepatht, func(path string, info fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() && !isFileSearching {
-			return nil
-		} else {
-			task := pool.SearchTask{
-				FilePath:   path,
-				KeyWord:    keywordt,
-				SearchType: isFileSearching,
-			}
-			// 发送任务给 Worker
-			workers.TasksIn <- task
-		}
-
-		//没找到返回nil
-		return nil
-	})
-
-	if err != nil {
-		fmt.Printf("遍历目录出错: %v\n", err)
-	}
-}
-
-// 这里问的，不过能理解
-// 3. 原理解析
-// os.Args: 这是一个 []string 切片。
-// 当你在终端输入 ./catch ./ func 并回车时：
-// os.Args[0] = "./catch"
-// os.Args[1] = "./"
-// os.Args[2] = "func"
-// 这就是为什么我们要判断 len(os.Args) < 3，防止用户只输了命令没输参数导致数组越界 panic。
 func inputThing() (string, string, bool) {
 	var searchfile bool
 	flag.BoolVar(&searchfile, "v", false, "查找目录名")
@@ -88,19 +39,19 @@ func inputThing() (string, string, bool) {
 }
 func main() {
 	dir, keyword, function := inputThing()
-	makew()
-	startw()
+	p := pool.NewPool(poolnum, poolchan)
+	p.Start()
 	done := make(chan struct{})
 	go func() {
-		for to := range workers.TasksOut {
+		for to := range p.TasksOut {
 			fmt.Printf("路径: %s\n , 行数: %d\n , 内容: %s\n", to.FilePath, to.LinNum, to.Content)
 		}
 		close(done)
 	}()
-	WorkPush(dir, keyword, function)
-	close(workers.TasksIn)
-	workers.Wg.Wait()
-	close(workers.TasksOut)
+	p.WorkPush(dir, keyword, function)
+	close(p.TasksIn)
+	p.Wg.Wait()
+	close(p.TasksOut)
 	<-done
 	fmt.Println("game over>.<")
 }

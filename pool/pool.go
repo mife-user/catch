@@ -3,7 +3,9 @@ package pool
 import (
 	"bufio"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -35,7 +37,7 @@ func (w *worker) Search(st *SearchTask) []SearchResult {
 		if strings.Contains(st.FilePath, st.KeyWord) {
 			result = append(result, SearchResult{
 				FilePath: st.FilePath,
-				LinNum:   0, // 文件名匹配没有行号
+				LinNum:   0,
 				Content:  "Matches Filename",
 			})
 		}
@@ -83,5 +85,32 @@ func NewPool(workerNum int, taskChanSize int) *Pool {
 		workers:  worker{Num: workerNum},
 		TasksIn:  make(chan SearchTask, taskChanSize),
 		TasksOut: make(chan SearchResult, taskChanSize),
+	}
+}
+func (p *Pool) WorkPush(filepatht string, keywordt string, isFileSearching bool) {
+	fmt.Println("开始递归搜索目录:", filepatht)
+	//这里应该用了递归，但我实在没看出来，可能是func这里，"path/filepath"主要是不知道这个包怎么用
+	err := filepath.WalkDir(filepatht, func(path string, info fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() && !isFileSearching {
+			return nil
+		} else {
+			task := SearchTask{
+				FilePath:   path,
+				KeyWord:    keywordt,
+				SearchType: isFileSearching,
+			}
+			// 发送任务给 Worker
+			p.TasksIn <- task
+		}
+
+		//没找到返回nil
+		return nil
+	})
+
+	if err != nil {
+		fmt.Printf("遍历目录出错: %v\n", err)
 	}
 }
