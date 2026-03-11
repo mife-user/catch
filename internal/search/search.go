@@ -2,6 +2,7 @@ package search
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,9 @@ type SearchConfig struct {
 	Recursive    bool
 	FileType     string
 	MaxGoroutine int
+	MaxFileSize  int64          // 最大文件大小限制（字节），默认 10MB
+	MaxMatches   int            // 单文件最大匹配行数，默认 100
+	Context      context.Context // 支持取消
 }
 
 // fileTask 文件搜索任务
@@ -125,6 +129,76 @@ func collectFiles(config SearchConfig) []fileTask {
 	return tasks
 }
 
+// collectFilesStreaming 流式收集文件并发送到通道（生产者模式）
+func collectFilesStreaming(ctx context.Context, config SearchConfig, taskChan chan<- fileTask) {
+	defer close(taskChan)
+
+	var walkDir func(dir string) bool
+	walkDir = func(dir string) bool {
+		select {
+		case <-ctx.Done():
+			return false // 取消
+		default:
+		}
+
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return true
+		}
+
+		for _, entry := range entries {
+			select {
+			case <-ctx.Done():
+				return false // 取消
+			default:
+			}
+
+			fullPath := filepath.Join(dir, entry.Name())
+
+			if entry.IsDir() {
+				if shouldSkipDir(entry.Name()) {
+					continue
+				}
+				if config.Recursive {
+					if !walkDir(fullPath) {
+						return false
+					}
+				}
+			} else {
+				// 跳过二进制文件
+				if isBinaryFile(fullPath) {
+					continue
+				}
+
+				// 文件类型过滤
+				if config.FileType != "" {
+					if !strings.HasSuffix(strings.ToLower(entry.Name()), strings.ToLower(config.FileType)) {
+						continue
+					}
+				}
+
+				// 检查文件大小
+				if config.MaxFileSize > 0 {
+					if info, err := os.Stat(fullPath); err == nil {
+						if info.Size() > config.MaxFileSize {
+							continue // 跳过大文件
+						}
+					}
+				}
+
+				select {
+				case taskChan <- fileTask{path: fullPath, config: config}:
+				case <-ctx.Done():
+					return false
+				}
+			}
+		}
+		return true
+	}
+
+	walkDir(config.Path)
+}
+
 // searchFile 搜索单个文件
 func searchFile(task fileTask) []SearchResult {
 	var results []SearchResult
@@ -149,6 +223,10 @@ func searchFile(task fileTask) []SearchResult {
 	lineNum := 0
 	var matchLines []string
 	var matchLineNums []int
+	maxMatches := task.config.MaxMatches
+	if maxMatches <= 0 {
+		maxMatches = 100
+	}
 
 	for scanner.Scan() {
 		lineNum++
@@ -156,6 +234,11 @@ func searchFile(task fileTask) []SearchResult {
 		if strings.Contains(strings.ToLower(line), strings.ToLower(task.config.Keyword)) {
 			matchLines = append(matchLines, line)
 			matchLineNums = append(matchLineNums, lineNum)
+
+			// 达到最大匹配数后停止
+			if len(matchLines) >= maxMatches {
+				break
+			}
 		}
 	}
 
@@ -171,21 +254,96 @@ func searchFile(task fileTask) []SearchResult {
 	return results
 }
 
-// Search 执行搜索（使用协程池）
+// Search 执行搜索（使用协程池，生产者-消费者模式）
 func Search(config SearchConfig) []SearchResult {
+	// 设置默认值
 	if config.MaxGoroutine <= 0 {
 		config.MaxGoroutine = 10
 	}
-
-	// 收集所有文件任务
-	tasks := collectFiles(config)
-	if len(tasks) == 0 {
-		return []SearchResult{}
+	if config.MaxFileSize <= 0 {
+		config.MaxFileSize = 10 * 1024 * 1024 // 默认 10MB
+	}
+	if config.MaxMatches <= 0 {
+		config.MaxMatches = 100 // 默认每文件最多 100 个匹配
+	}
+	if config.Context == nil {
+		config.Context = context.Background()
 	}
 
-	// 创建任务通道
-	taskChan := make(chan fileTask, len(tasks))
-	resultChan := make(chan []SearchResult, len(tasks))
+	ctx := config.Context
+
+	// 创建流式通道（限制缓冲区大小避免内存问题）
+	taskChan := make(chan fileTask, 100)
+	resultChan := make(chan []SearchResult, 100)
+
+	// 启动生产者（异步遍历目录）
+	go collectFilesStreaming(ctx, config, taskChan)
+
+	// 启动工作协程（消费者）
+	var wg sync.WaitGroup
+	for i := 0; i < config.MaxGoroutine; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for task := range taskChan {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					resultChan <- searchFile(task)
+				}
+			}
+		}()
+	}
+
+	// 等待所有协程完成后关闭结果通道
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// 收集结果（流式处理）
+	var allResults []SearchResult
+	for {
+		select {
+		case <-ctx.Done():
+			return allResults // 返回已收集的结果
+		case result, ok := <-resultChan:
+			if !ok {
+				return allResults
+			}
+			allResults = append(allResults, result...)
+		}
+	}
+}
+
+// ResultCallback 结果回调函数类型
+type ResultCallback func(result SearchResult)
+
+// SearchStreaming 执行流式搜索，每找到一个结果就调用回调函数
+func SearchStreaming(config SearchConfig, callback ResultCallback) int {
+	// 设置默认值
+	if config.MaxGoroutine <= 0 {
+		config.MaxGoroutine = 10
+	}
+	if config.MaxFileSize <= 0 {
+		config.MaxFileSize = 10 * 1024 * 1024 // 默认 10MB
+	}
+	if config.MaxMatches <= 0 {
+		config.MaxMatches = 100 // 默认每文件最多 100 个匹配
+	}
+	if config.Context == nil {
+		config.Context = context.Background()
+	}
+
+	ctx := config.Context
+
+	// 创建流式通道
+	taskChan := make(chan fileTask, 100)
+	resultChan := make(chan SearchResult, 100)
+
+	// 启动生产者
+	go collectFilesStreaming(ctx, config, taskChan)
 
 	// 启动工作协程
 	var wg sync.WaitGroup
@@ -194,30 +352,46 @@ func Search(config SearchConfig) []SearchResult {
 		go func() {
 			defer wg.Done()
 			for task := range taskChan {
-				resultChan <- searchFile(task)
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					// 搜索单个文件并逐个发送结果
+					results := searchFile(task)
+					for _, r := range results {
+						select {
+						case resultChan <- r:
+						case <-ctx.Done():
+							return
+						}
+					}
+				}
 			}
 		}()
 	}
 
-	// 发送所有任务
-	for _, task := range tasks {
-		taskChan <- task
-	}
-	close(taskChan)
-
-	// 等待所有协程完成
+	// 等待所有协程完成后关闭结果通道
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
 
-	// 收集结果
-	var allResults []SearchResult
-	for result := range resultChan {
-		allResults = append(allResults, result...)
+	// 流式处理结果，每找到一个就调用回调
+	count := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return count
+		case result, ok := <-resultChan:
+			if !ok {
+				return count
+			}
+			if callback != nil {
+				callback(result)
+			}
+			count++
+		}
 	}
-
-	return allResults
 }
 
 // PrintResults 打印搜索结果（带高亮）
@@ -235,20 +409,20 @@ func PrintResults(results []SearchResult, keyword string) {
 			matchType = "📁"
 		}
 
-		fmt.Printf("%s [%d] %s\n", matchType, i+1, highlight(result.FilePath, keyword))
+		fmt.Printf("%s [%d] %s\n", matchType, i+1, Highlight(result.FilePath, keyword))
 
 		if result.MatchType == "content" {
 			for j, line := range result.Lines {
 				lineNum := result.LineNumbers[j]
-				fmt.Printf("    %3d: %s\n", lineNum, highlight(line, keyword))
+				fmt.Printf("    %3d: %s\n", lineNum, Highlight(line, keyword))
 			}
 		}
 		fmt.Println()
 	}
 }
 
-// highlight 高亮关键字
-func highlight(text, keyword string) string {
+// Highlight 高亮关键字
+func Highlight(text, keyword string) string {
 	if keyword == "" {
 		return text
 	}
@@ -299,12 +473,12 @@ func PrintResultsPaged(results []SearchResult, keyword string, pageSize int) {
 				matchType = "📁"
 			}
 
-			fmt.Printf("%s [%d] %s\n", matchType, i+1, highlight(result.FilePath, keyword))
+			fmt.Printf("%s [%d] %s\n", matchType, i+1, Highlight(result.FilePath, keyword))
 
 			if result.MatchType == "content" {
 				for j, line := range result.Lines {
 					lineNum := result.LineNumbers[j]
-					fmt.Printf("    %3d: %s\n", lineNum, highlight(line, keyword))
+					fmt.Printf("    %3d: %s\n", lineNum, Highlight(line, keyword))
 				}
 			}
 			fmt.Println()

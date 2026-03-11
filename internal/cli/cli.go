@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"catch/internal/search"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -229,18 +231,35 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter) {
 	recInput := readLine(reader)
 	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
 
+	// 创建带超时的 context（60秒超时）
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	config := search.SearchConfig{
 		Keyword:      keyword,
 		Path:         ".",
 		Recursive:    recursive,
 		MaxGoroutine: 10,
+		Context:      ctx,
 	}
 
-	writer.WriteString("\n🔍 正在搜索...\n")
+	writer.WriteString("\n🔍 正在搜索...\n\n")
 	writer.Flush()
 
-	results := search.Search(config)
-	search.PrintResults(results, keyword)
+	// 使用流式搜索，实时输出结果
+	index := 0
+	count := search.SearchStreaming(config, func(result search.SearchResult) {
+		index++
+		printStreamingResult(writer, result, keyword, index)
+	})
+
+	if count == 0 {
+		writer.WriteString("未找到匹配的结果\n")
+		writer.Flush()
+	} else {
+		writer.WriteString(fmt.Sprintf("找到 %d 个匹配结果\n", count))
+		writer.Flush()
+	}
 	pause(writer)
 }
 
@@ -264,27 +283,37 @@ func searchFilename(reader *bufio.Reader, writer *SimpleWriter) {
 	recInput := readLine(reader)
 	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
 
+	// 创建带超时的 context（60秒超时）
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	config := search.SearchConfig{
 		Keyword:      keyword,
 		Path:         ".",
 		Recursive:    recursive,
 		MaxGoroutine: 10,
+		Context:      ctx,
 	}
 
-	writer.WriteString("\n🔍 正在搜索...\n")
+	writer.WriteString("\n🔍 正在搜索...\n\n")
 	writer.Flush()
 
-	results := search.Search(config)
-
-	// 只显示文件名匹配的结果
-	filenameResults := make([]search.SearchResult, 0)
-	for _, r := range results {
-		if r.MatchType == "filename" {
-			filenameResults = append(filenameResults, r)
+	// 使用流式搜索，只输出文件名匹配的结果
+	index := 0
+	count := search.SearchStreaming(config, func(result search.SearchResult) {
+		if result.MatchType == "filename" {
+			index++
+			printStreamingResult(writer, result, keyword, index)
 		}
-	}
+	})
 
-	search.PrintResults(filenameResults, keyword)
+	if count == 0 || index == 0 {
+		writer.WriteString("未找到匹配的文件\n")
+		writer.Flush()
+	} else {
+		writer.WriteString(fmt.Sprintf("找到 %d 个匹配文件\n", index))
+		writer.Flush()
+	}
 	pause(writer)
 }
 
@@ -332,19 +361,36 @@ func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		goroutines = 10
 	}
 
+	// 创建带超时的 context（120秒超时）
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
 	config := search.SearchConfig{
 		Keyword:      keyword,
 		Path:         path,
 		Recursive:    recursive,
 		FileType:     fileType,
 		MaxGoroutine: goroutines,
+		Context:      ctx,
 	}
 
-	writer.WriteString("\n🔍 正在搜索...\n")
+	writer.WriteString("\n🔍 正在搜索...\n\n")
 	writer.Flush()
 
-	results := search.Search(config)
-	search.PrintResults(results, keyword)
+	// 使用流式搜索，实时输出结果
+	index := 0
+	count := search.SearchStreaming(config, func(result search.SearchResult) {
+		index++
+		printStreamingResult(writer, result, keyword, index)
+	})
+
+	if count == 0 {
+		writer.WriteString("未找到匹配的结果\n")
+		writer.Flush()
+	} else {
+		writer.WriteString(fmt.Sprintf("找到 %d 个匹配结果\n", count))
+		writer.Flush()
+	}
 	pause(writer)
 }
 
@@ -352,6 +398,25 @@ func pause(writer *SimpleWriter) {
 	writer.WriteString("\n按 Enter 键继续...")
 	writer.Flush()
 	readLine(bufio.NewReader(os.Stdin))
+}
+
+// printStreamingResult 流式打印单个搜索结果
+func printStreamingResult(writer *SimpleWriter, result search.SearchResult, keyword string, index int) {
+	matchType := "📄"
+	if result.MatchType == "filename" {
+		matchType = "📁"
+	}
+
+	writer.WriteString(fmt.Sprintf("%s [%d] %s\n", matchType, index, search.Highlight(result.FilePath, keyword)))
+
+	if result.MatchType == "content" {
+		for j, line := range result.Lines {
+			lineNum := result.LineNumbers[j]
+			writer.WriteString(fmt.Sprintf("    %3d: %s\n", lineNum, search.Highlight(line, keyword)))
+		}
+	}
+	writer.WriteString("\n")
+	writer.Flush()
 }
 
 // AddToPath 添加到系统环境变量
