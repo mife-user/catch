@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -81,6 +80,14 @@ func runTerminalUI(reader *bufio.Reader, writer *SimpleWriter) {
 		{Title: "❌ 退出", Action: func() {}, Shortcut: "q"},
 	}
 
+	// 显示欢迎信息
+	writer.WriteString("╔════════════════════════════════════════════╗\n")
+	writer.WriteString("║     🎯 Catch - 文件搜索工具                ║\n")
+	writer.WriteString("║     高性能本地文件内容搜索                 ║\n")
+	writer.WriteString("╚════════════════════════════════════════════╝\n")
+	writer.WriteString("\n")
+	writer.Flush()
+
 	for {
 		printMenu(writer, menuItems)
 		writer.WriteString("\n请选择功能 (1-4 或 q): ")
@@ -98,11 +105,14 @@ func runTerminalUI(reader *bufio.Reader, writer *SimpleWriter) {
 		// 处理数字选择
 		selected, err := strconv.Atoi(input)
 		if err != nil || selected < 1 || selected > len(menuItems) {
-			writer.WriteString("❌ 无效选择，请重试\n")
+			writer.WriteString("❌ 无效选择，请重试\n\n")
 			writer.Flush()
 			continue
 		}
 
+		// 操作完成后显示分隔线
+		writer.WriteString("\n" + strings.Repeat("─", 50) + "\n\n")
+		writer.Flush()
 		menuItems[selected-1].Action()
 	}
 }
@@ -157,25 +167,25 @@ func readLine(reader *bufio.Reader) string {
 }
 
 func printMenu(writer *SimpleWriter, items []MenuItem) {
-	// 清屏
-	clearScreen()
-
-	writer.WriteString("╔════════════════════════════════════════════╗\n")
-	writer.WriteString("║     🎯 Catch - 文件搜索工具                ║\n")
-	writer.WriteString("╠════════════════════════════════════════════╣\n")
+	// 移除清屏，改为直接打印分隔线
+	writer.WriteString("┌────────────────────────────────────────────┐\n")
+	writer.WriteString("│  🎯 Catch - 文件搜索工具                   │\n")
+	writer.WriteString("├────────────────────────────────────────────┤\n")
 
 	for _, item := range items {
 		// 计算显示宽度：中文和 Emoji 算 2 个字符，英文算 1 个
 		title := item.Title
 		displayWidth := getDisplayWidth(title)
-		padding := 38 - displayWidth
+		shortcutWidth := len(item.Shortcut) + 2 // [1]
+		// 总宽度 44（中文字符算 2）
+		padding := 44 - displayWidth - shortcutWidth
 		if padding < 0 {
 			padding = 0
 		}
-		writer.WriteString(fmt.Sprintf("║  [%s] %s%s ║\n", item.Shortcut, title, strings.Repeat(" ", padding)))
+		writer.WriteString(fmt.Sprintf("│  [%s] %s%s│\n", item.Shortcut, title, strings.Repeat(" ", padding)))
 	}
 
-	writer.WriteString("╚════════════════════════════════════════════╝\n")
+	writer.WriteString("└────────────────────────────────────────────┘\n")
 	writer.Flush()
 }
 
@@ -183,32 +193,52 @@ func printMenu(writer *SimpleWriter, items []MenuItem) {
 func getDisplayWidth(s string) int {
 	width := 0
 	for _, r := range s {
-		if r >= 0x4E00 && r <= 0x9FFF {
-			// 中文字符
+		switch {
+		case r >= 0x4E00 && r <= 0x9FFF:
+			// 中文字符 (CJK Unified Ideographs)
 			width += 2
-		} else if r >= 0x1F000 {
-			// Emoji 字符（基本在 U+1F000 以上）
+		case r >= 0x3400 && r <= 0x4DBF:
+			// CJK Unified Ideographs Extension A
 			width += 2
-		} else if r >= 0x3000 && r <= 0x303F {
+		case r >= 0xF900 && r <= 0xFAFF:
+			// CJK Compatibility Ideographs
+			width += 2
+		case r >= 0x3000 && r <= 0x303F:
 			// CJK 符号和标点
 			width += 2
-		} else if r >= 0xFF00 && r <= 0xFFEF {
+		case r >= 0xFF00 && r <= 0xFFEF:
 			// 全角字符
 			width += 2
-		} else {
-			// ASCII 字符
+		case r >= 0x1F600 && r <= 0x1F64F:
+			// Emoticons (表情符号)
+			width += 2
+		case r >= 0x1F300 && r <= 0x1F5FF:
+			// Miscellaneous Symbols and Pictographs
+			width += 2
+		case r >= 0x1F680 && r <= 0x1F6FF:
+			// Transport and Map Symbols
+			width += 2
+		case r >= 0x1F1E0 && r <= 0x1F1FF:
+			// Regional Indicator Symbols (国旗)
+			width += 2
+		case r >= 0x2600 && r <= 0x26FF:
+			// Miscellaneous Symbols
+			width += 2
+		case r >= 0x2700 && r <= 0x27BF:
+			// Dingbats
+			width += 2
+		case r >= 0xFE00 && r <= 0xFE0F:
+			// Variation Selectors (忽略)
+			width += 0
+		case r >= 0x200D:
+			// Zero Width Joiner (忽略)
+			width += 0
+		default:
+			// ASCII 字符和其他 Unicode 字符
 			width += 1
 		}
 	}
 	return width
-}
-
-func clearScreen() {
-	if runtime.GOOS == "windows" {
-		exec.Command("cmd", "/c", "cls").Run()
-	} else {
-		exec.Command("clear").Run()
-	}
 }
 
 func searchContent(reader *bufio.Reader, writer *SimpleWriter) {
@@ -231,35 +261,138 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter) {
 	recInput := readLine(reader)
 	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
 
+	// 验证路径
+	searchPath := "."
+	if _, err := os.Stat(searchPath); err != nil {
+		writer.WriteString(fmt.Sprintf("❌ 路径不存在：%s\n", searchPath))
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
+	writer.WriteString("是否使用分页显示？(y/n): ")
+	writer.Flush()
+
+	pagedInput := readLine(reader)
+	usePaged := strings.TrimSpace(strings.ToLower(pagedInput)) == "y"
+
+	pageSize := 10
+	if usePaged {
+		writer.WriteString("每页显示条数 (默认 10): ")
+		writer.Flush()
+
+		pageSizeInput := readLine(reader)
+		if size, err := strconv.Atoi(strings.TrimSpace(pageSizeInput)); err == nil && size > 0 {
+			pageSize = size
+			if pageSize > 100 {
+				pageSize = 100
+			}
+		}
+	}
+
+	writer.WriteString("显示上下文行数 (默认 0，不显示): ")
+	writer.Flush()
+
+	contextLinesInput := readLine(reader)
+	contextLines, _ := strconv.Atoi(strings.TrimSpace(contextLinesInput))
+	if contextLines < 0 {
+		contextLines = 0
+	}
+
+	writer.WriteString("是否导出结果？(y/n): ")
+	writer.Flush()
+
+	exportInput := readLine(reader)
+	exportResults := strings.TrimSpace(strings.ToLower(exportInput)) == "y"
+
+	exportFormat := ""
+	exportPath := ""
+	if exportResults {
+		writer.WriteString("导出格式 (json/csv/txt): ")
+		writer.Flush()
+		exportFormat = strings.TrimSpace(strings.ToLower(readLine(reader)))
+		if exportFormat == "" {
+			exportFormat = "json"
+		}
+
+		writer.WriteString(fmt.Sprintf("导出路径 (默认 results.%s): ", exportFormat))
+		writer.Flush()
+		exportPath = strings.TrimSpace(readLine(reader))
+		if exportPath == "" {
+			exportPath = fmt.Sprintf("results.%s", exportFormat)
+		}
+	}
+
 	// 创建带超时的 context（60秒超时）
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
+	startTime := time.Now()
+
 	config := search.SearchConfig{
 		Keyword:      keyword,
-		Path:         ".",
+		Path:         searchPath,
 		Recursive:    recursive,
 		MaxGoroutine: 10,
+		ContextLines: contextLines,
 		Context:      ctx,
+		ProgressCallback: func(stats search.ScanStats) {
+			// 每 50 个文件更新一次进度
+			if stats.FilesScanned%50 == 0 {
+				elapsed := time.Since(startTime)
+				speed := float64(stats.FilesScanned) / elapsed.Seconds()
+				writer.WriteString(fmt.Sprintf("\r📊 进度: 已扫描 %d 个文件，匹配 %d 个，速度 %.0f 文件/秒",
+					stats.FilesScanned, stats.FilesMatched, speed))
+				writer.Flush()
+			}
+		},
 	}
 
-	writer.WriteString("\n🔍 正在搜索...\n\n")
+	writer.WriteString("\n🔍 正在搜索...\n")
 	writer.Flush()
 
-	// 使用流式搜索，实时输出结果
-	index := 0
-	count := search.SearchStreaming(config, func(result search.SearchResult) {
-		index++
-		printStreamingResult(writer, result, keyword, index)
-	})
+	// 收集所有结果
+	results := search.Search(config)
 
-	if count == 0 {
+	// 清除最后的进度行
+	writer.WriteString("\r" + strings.Repeat(" ", 80) + "\r")
+
+	elapsed := time.Since(startTime)
+	totalCount := len(results)
+
+	if totalCount == 0 {
 		writer.WriteString("未找到匹配的结果\n")
 		writer.Flush()
-	} else {
-		writer.WriteString(fmt.Sprintf("找到 %d 个匹配结果\n", count))
-		writer.Flush()
+		pause(writer)
+		return
 	}
+
+	writer.WriteString(fmt.Sprintf("✅ 找到 %d 个匹配结果，耗时 %v\n", totalCount, elapsed.Round(time.Millisecond)))
+	writer.Flush()
+
+	// 导出结果
+	if exportResults && exportPath != "" {
+		writer.WriteString(fmt.Sprintf("📤 正在导出结果到 %s...\n", exportPath))
+		writer.Flush()
+
+		if err := search.ExportResults(results, keyword, exportFormat, exportPath); err != nil {
+			writer.WriteString(fmt.Sprintf("❌ 导出失败: %v\n", err))
+			writer.Flush()
+		} else {
+			writer.WriteString(fmt.Sprintf("✅ 结果已导出到: %s\n", exportPath))
+			writer.Flush()
+		}
+	}
+
+	if usePaged {
+		// 分页显示
+		displayPagedResults(writer, results, keyword, pageSize)
+	} else {
+		// 直接显示所有结果
+		search.PrintResults(results, keyword)
+	}
+
+	writer.Flush()
 	pause(writer)
 }
 
@@ -283,37 +416,62 @@ func searchFilename(reader *bufio.Reader, writer *SimpleWriter) {
 	recInput := readLine(reader)
 	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
 
+	// 验证路径
+	searchPath := "."
+	if _, err := os.Stat(searchPath); err != nil {
+		writer.WriteString(fmt.Sprintf("❌ 路径不存在：%s\n", searchPath))
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
 	// 创建带超时的 context（60秒超时）
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
+	startTime := time.Now()
+
 	config := search.SearchConfig{
 		Keyword:      keyword,
-		Path:         ".",
+		Path:         searchPath,
 		Recursive:    recursive,
 		MaxGoroutine: 10,
 		Context:      ctx,
+		ProgressCallback: func(stats search.ScanStats) {
+			if stats.FilesScanned%50 == 0 {
+				elapsed := time.Since(startTime)
+				speed := float64(stats.FilesScanned) / elapsed.Seconds()
+				writer.WriteString(fmt.Sprintf("\r📊 进度: 已扫描 %d 个文件，匹配 %d 个，速度 %.0f 文件/秒",
+					stats.FilesScanned, stats.FilesMatched, speed))
+				writer.Flush()
+			}
+		},
 	}
 
-	writer.WriteString("\n🔍 正在搜索...\n\n")
+	writer.WriteString("\n🔍 正在搜索...\n")
 	writer.Flush()
 
 	// 使用流式搜索，只输出文件名匹配的结果
 	index := 0
-	count := search.SearchStreaming(config, func(result search.SearchResult) {
+	_ = search.SearchStreaming(config, func(result search.SearchResult) {
 		if result.MatchType == "filename" {
 			index++
+			// 清除进度行
+			writer.WriteString("\r" + strings.Repeat(" ", 80) + "\r")
 			printStreamingResult(writer, result, keyword, index)
 		}
 	})
 
-	if count == 0 || index == 0 {
+	// 清除最后的进度行
+	writer.WriteString("\r" + strings.Repeat(" ", 80) + "\r")
+
+	elapsed := time.Since(startTime)
+	if index == 0 {
 		writer.WriteString("未找到匹配的文件\n")
-		writer.Flush()
 	} else {
-		writer.WriteString(fmt.Sprintf("找到 %d 个匹配文件\n", index))
-		writer.Flush()
+		writer.WriteString(fmt.Sprintf("✅ 找到 %d 个匹配文件，耗时 %v\n", index, elapsed.Round(time.Millisecond)))
 	}
+	writer.Flush()
 	pause(writer)
 }
 
@@ -340,6 +498,14 @@ func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		path = "."
 	}
 
+	// 验证路径
+	if _, err := os.Stat(path); err != nil {
+		writer.WriteString(fmt.Sprintf("❌ 路径不存在：%s\n", path))
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
 	writer.WriteString("是否递归搜索子目录？(y/n): ")
 	writer.Flush()
 
@@ -360,10 +526,70 @@ func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
 	if err != nil || goroutines <= 0 {
 		goroutines = 10
 	}
+	if goroutines > 100 {
+		goroutines = 100
+		writer.WriteString("⚠️  协程数已限制为 100\n")
+		writer.Flush()
+	}
+
+	writer.WriteString("是否使用分页显示？(y/n): ")
+	writer.Flush()
+
+	pagedInput := readLine(reader)
+	usePaged := strings.TrimSpace(strings.ToLower(pagedInput)) == "y"
+
+	pageSize := 10
+	if usePaged {
+		writer.WriteString("每页显示条数 (默认 10): ")
+		writer.Flush()
+
+		pageSizeInput := readLine(reader)
+		if size, err := strconv.Atoi(strings.TrimSpace(pageSizeInput)); err == nil && size > 0 {
+			pageSize = size
+			if pageSize > 100 {
+				pageSize = 100
+			}
+		}
+	}
+
+	writer.WriteString("显示上下文行数 (默认 0，不显示): ")
+	writer.Flush()
+
+	contextLinesInput := readLine(reader)
+	contextLines, _ := strconv.Atoi(strings.TrimSpace(contextLinesInput))
+	if contextLines < 0 {
+		contextLines = 0
+	}
+
+	writer.WriteString("是否导出结果？(y/n): ")
+	writer.Flush()
+
+	exportInput := readLine(reader)
+	exportResults := strings.TrimSpace(strings.ToLower(exportInput)) == "y"
+
+	exportFormat := ""
+	exportPath := ""
+	if exportResults {
+		writer.WriteString("导出格式 (json/csv/txt): ")
+		writer.Flush()
+		exportFormat = strings.TrimSpace(strings.ToLower(readLine(reader)))
+		if exportFormat == "" {
+			exportFormat = "json"
+		}
+
+		writer.WriteString(fmt.Sprintf("导出路径 (默认 results.%s): ", exportFormat))
+		writer.Flush()
+		exportPath = strings.TrimSpace(readLine(reader))
+		if exportPath == "" {
+			exportPath = fmt.Sprintf("results.%s", exportFormat)
+		}
+	}
 
 	// 创建带超时的 context（120秒超时）
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
+
+	startTime := time.Now()
 
 	config := search.SearchConfig{
 		Keyword:      keyword,
@@ -371,26 +597,64 @@ func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		Recursive:    recursive,
 		FileType:     fileType,
 		MaxGoroutine: goroutines,
+		ContextLines: contextLines,
 		Context:      ctx,
+		ProgressCallback: func(stats search.ScanStats) {
+			if stats.FilesScanned%50 == 0 {
+				elapsed := time.Since(startTime)
+				speed := float64(stats.FilesScanned) / elapsed.Seconds()
+				writer.WriteString(fmt.Sprintf("\r📊 进度: 已扫描 %d 个文件，匹配 %d 个，速度 %.0f 文件/秒",
+					stats.FilesScanned, stats.FilesMatched, speed))
+				writer.Flush()
+			}
+		},
 	}
 
-	writer.WriteString("\n🔍 正在搜索...\n\n")
+	writer.WriteString("\n🔍 正在搜索...\n")
 	writer.Flush()
 
-	// 使用流式搜索，实时输出结果
-	index := 0
-	count := search.SearchStreaming(config, func(result search.SearchResult) {
-		index++
-		printStreamingResult(writer, result, keyword, index)
-	})
+	// 收集所有结果
+	results := search.Search(config)
 
-	if count == 0 {
+	// 清除最后的进度行
+	writer.WriteString("\r" + strings.Repeat(" ", 80) + "\r")
+
+	elapsed := time.Since(startTime)
+	totalCount := len(results)
+
+	if totalCount == 0 {
 		writer.WriteString("未找到匹配的结果\n")
 		writer.Flush()
-	} else {
-		writer.WriteString(fmt.Sprintf("找到 %d 个匹配结果\n", count))
-		writer.Flush()
+		pause(writer)
+		return
 	}
+
+	writer.WriteString(fmt.Sprintf("✅ 找到 %d 个匹配结果，耗时 %v\n", totalCount, elapsed.Round(time.Millisecond)))
+	writer.Flush()
+
+	// 导出结果
+	if exportResults && exportPath != "" {
+		writer.WriteString(fmt.Sprintf("📤 正在导出结果到 %s...\n", exportPath))
+		writer.Flush()
+
+		if err := search.ExportResults(results, keyword, exportFormat, exportPath); err != nil {
+			writer.WriteString(fmt.Sprintf("❌ 导出失败: %v\n", err))
+			writer.Flush()
+		} else {
+			writer.WriteString(fmt.Sprintf("✅ 结果已导出到: %s\n", exportPath))
+			writer.Flush()
+		}
+	}
+
+	if usePaged {
+		// 分页显示
+		displayPagedResults(writer, results, keyword, pageSize)
+	} else {
+		// 直接显示所有结果
+		search.PrintResults(results, keyword)
+	}
+
+	writer.Flush()
 	pause(writer)
 }
 
@@ -417,6 +681,83 @@ func printStreamingResult(writer *SimpleWriter, result search.SearchResult, keyw
 	}
 	writer.WriteString("\n")
 	writer.Flush()
+}
+
+// displayPagedResults 交互式分页显示结果
+func displayPagedResults(writer *SimpleWriter, results []search.SearchResult, keyword string, pageSize int) {
+	if len(results) == 0 {
+		writer.WriteString("未找到匹配的结果\n")
+		writer.Flush()
+		return
+	}
+
+	paged := search.PageResults(results, 1, pageSize)
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		// 打印当前页
+		search.PrintPagedResults(paged, keyword)
+		writer.Flush()
+
+		// 如果没有更多页，退出
+		if !paged.HasNext && !paged.HasPrev {
+			break
+		}
+
+		// 显示导航
+		writer.WriteString("\n导航: [n] 下一页, [p] 上一页, [页码] 跳转, [q] 退出: ")
+		writer.Flush()
+
+		input := readLine(reader)
+		input = strings.TrimSpace(strings.ToLower(input))
+
+		if input == "q" || input == "quit" || input == "exit" {
+			break
+		}
+
+		newPage := paged.Page
+
+		switch input {
+		case "n", "next":
+			if paged.HasNext {
+				newPage = paged.Page + 1
+			} else {
+				writer.WriteString("⚠️  已经是最后一页\n")
+				writer.Flush()
+				continue
+			}
+		case "p", "prev", "previous":
+			if paged.HasPrev {
+				newPage = paged.Page - 1
+			} else {
+				writer.WriteString("⚠️  已经是第一页\n")
+				writer.Flush()
+				continue
+			}
+		default:
+			// 尝试解析页码
+			if pageNum, err := strconv.Atoi(input); err == nil && pageNum > 0 {
+				if pageNum <= paged.TotalPages {
+					newPage = pageNum
+				} else {
+					writer.WriteString(fmt.Sprintf("⚠️  页码超出范围 (1-%d)\n", paged.TotalPages))
+					writer.Flush()
+					continue
+				}
+			} else {
+				writer.WriteString("❌ 无效输入\n")
+				writer.Flush()
+				continue
+			}
+		}
+
+		// 获取新页
+		paged = search.PageResults(results, newPage, pageSize)
+		
+		// 清屏效果（可选）
+		writer.WriteString("\n")
+		writer.Flush()
+	}
 }
 
 // AddToPath 添加到系统环境变量
