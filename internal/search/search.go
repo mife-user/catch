@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -40,6 +42,12 @@ type SearchConfig struct {
 	ContextLines     int                   // 上下文行数，默认 0（不显示上下文）
 	Context          context.Context       // 支持取消
 	ProgressCallback func(stats ScanStats) // 进度回调函数
+	UseRegex         bool                  // 是否使用正则表达式搜索
+	SearchMode       string                // 搜索模式：single（单关键字）, multi_and（多关键字AND）, multi_or（多关键字OR）
+	Keywords         []string              // 多关键字列表（当 SearchMode 为 multi_and 或 multi_or 时使用）
+	RegexPattern     *regexp.Regexp        // 编译后的正则表达式
+	IgnorePatterns   []string              // 忽略模式列表（支持 glob 模式）
+	LoadGitignore    bool                  // 是否加载 .gitignore 和 .catchignore
 }
 
 // PagedResults 分页结果结构
@@ -230,6 +238,16 @@ func collectFiles(config SearchConfig) []fileTask {
 func collectFilesStreaming(ctx context.Context, config SearchConfig, taskChan chan<- fileTask) {
 	defer close(taskChan)
 
+	// 加载忽略模式
+	var ignorePatterns []string
+	if config.LoadGitignore {
+		ignorePatterns = loadIgnorePatterns(config.Path)
+	}
+	// 合并自定义忽略模式
+	if len(config.IgnorePatterns) > 0 {
+		ignorePatterns = append(ignorePatterns, config.IgnorePatterns...)
+	}
+
 	var walkDir func(dir string) bool
 	walkDir = func(dir string) bool {
 		select {
@@ -251,9 +269,14 @@ func collectFilesStreaming(ctx context.Context, config SearchConfig, taskChan ch
 			}
 
 			fullPath := filepath.Join(dir, entry.Name())
+			relativePath, _ := filepath.Rel(config.Path, fullPath)
 
 			if entry.IsDir() {
 				if shouldSkipDir(entry.Name()) {
+					continue
+				}
+				// 检查是否应该忽略该目录
+				if len(ignorePatterns) > 0 && shouldIgnorePath(relativePath, ignorePatterns) {
 					continue
 				}
 				// 符号链接检测，避免死循环
@@ -272,6 +295,10 @@ func collectFilesStreaming(ctx context.Context, config SearchConfig, taskChan ch
 				}
 				// 跳过二进制文件
 				if isBinaryFile(fullPath) {
+					continue
+				}
+				// 检查是否应该忽略该文件
+				if len(ignorePatterns) > 0 && shouldIgnorePath(relativePath, ignorePatterns) {
 					continue
 				}
 
@@ -318,6 +345,97 @@ func isSymlink(path string, entry os.DirEntry) bool {
 	return false
 }
 
+// loadIgnorePatterns 加载忽略模式
+func loadIgnorePatterns(searchPath string) []string {
+	var patterns []string
+
+	// 加载 .catchignore
+	catchignorePath := filepath.Join(searchPath, ".catchignore")
+	if p := readIgnoreFile(catchignorePath); len(p) > 0 {
+		patterns = append(patterns, p...)
+	}
+
+	// 加载 .gitignore
+	gitignorePath := filepath.Join(searchPath, ".gitignore")
+	if p := readIgnoreFile(gitignorePath); len(p) > 0 {
+		patterns = append(patterns, p...)
+	}
+
+	return patterns
+}
+
+// readIgnoreFile 读取忽略文件
+func readIgnoreFile(filePath string) []string {
+	var patterns []string
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return patterns // 文件不存在或无法打开时返回空列表
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// 跳过空行和注释行
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, line)
+	}
+
+	return patterns
+}
+
+// shouldIgnorePath 检查路径是否应该被忽略
+func shouldIgnorePath(relativePath string, ignorePatterns []string) bool {
+	// 转换为 Unix 风格路径（使用 / 作为分隔符）
+	unixPath := filepath.ToSlash(relativePath)
+	baseName := path.Base(unixPath)
+
+	for _, pattern := range ignorePatterns {
+		// 支持简单匹配和 glob 模式
+		if matchIgnorePattern(baseName, pattern) || matchIgnorePattern(unixPath, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// matchIgnorePattern 匹配忽略模式（支持 glob）
+func matchIgnorePattern(name, pattern string) bool {
+	// 精确匹配
+	if name == pattern {
+		return true
+	}
+
+	// 后缀匹配（以 / 结尾的模式）
+	if strings.HasSuffix(pattern, "/") {
+		pattern = strings.TrimSuffix(pattern, "/")
+		if strings.HasSuffix(name, "/"+pattern) || name == pattern {
+			return true
+		}
+	}
+
+	// 前缀匹配（以 * 开头）
+	if strings.HasPrefix(pattern, "*") {
+		suffix := strings.TrimPrefix(pattern, "*")
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+
+	// 文件名精确匹配（路径中包含文件名）
+	if path.Base(name) == pattern {
+		return true
+	}
+
+	// 使用 filepath.Match 支持 glob 模式
+	matched, _ := filepath.Match(pattern, name)
+	return matched
+}
+
 // searchFile 搜索单个文件
 func searchFile(task fileTask, stats *ScanStats, mu *sync.Mutex) []SearchResult {
 	// 更新进度
@@ -331,8 +449,8 @@ func searchFile(task fileTask, stats *ScanStats, mu *sync.Mutex) []SearchResult 
 
 	var results []resultCollector
 
-	// 文件名搜索（使用 EqualFold 避免 ToLower 分配）
-	if strings.Contains(strings.ToLower(filepath.Base(task.path)), strings.ToLower(task.config.Keyword)) {
+	// 文件名搜索（根据搜索模式选择匹配方式）
+	if matchFilename(filepath.Base(task.path), task.config) {
 		results = append(results, resultCollector{
 			filePath:  task.path,
 			matchType: "filename",
@@ -364,7 +482,6 @@ func searchFile(task fileTask, stats *ScanStats, mu *sync.Mutex) []SearchResult 
 	}
 
 	// 搜索匹配的行
-	keyword := task.config.Keyword
 	maxMatches := task.config.MaxMatches
 	if maxMatches <= 0 {
 		maxMatches = 100
@@ -377,7 +494,7 @@ func searchFile(task fileTask, stats *ScanStats, mu *sync.Mutex) []SearchResult 
 	var allContextAfter [][]ContextLine
 
 	for i, line := range allLines {
-		if containsIgnoreCase(line, keyword) {
+		if matchLine(line, task.config) {
 			matchLines = append(matchLines, line)
 			matchLineNums = append(matchLineNums, i+1)
 
@@ -499,6 +616,82 @@ func containsIgnoreCase(s, substr string) bool {
 	lowerS := strings.ToLower(s)
 	lowerSubstr := strings.ToLower(substr)
 	return strings.Contains(lowerS, lowerSubstr)
+}
+
+// matchLine 根据配置匹配行内容
+func matchLine(line string, config SearchConfig) bool {
+	switch config.SearchMode {
+	case "multi_and":
+		return matchContentAnd(line, config.Keywords)
+	case "multi_or":
+		return matchContentOr(line, config.Keywords)
+	default:
+		// 单关键字模式
+		if config.UseRegex {
+			return matchRegex(line, config.RegexPattern)
+		}
+		return containsIgnoreCase(line, config.Keyword)
+	}
+}
+
+// matchFilename 根据配置匹配文件名
+func matchFilename(filename string, config SearchConfig) bool {
+	switch config.SearchMode {
+	case "multi_and":
+		return matchContentAnd(filename, config.Keywords)
+	case "multi_or":
+		return matchContentOr(filename, config.Keywords)
+	default:
+		// 单关键字模式
+		if config.UseRegex {
+			return matchRegex(filename, config.RegexPattern)
+		}
+		return containsIgnoreCase(filename, config.Keyword)
+	}
+}
+
+// matchContentAnd 所有关键字都必须匹配（AND 逻辑）
+func matchContentAnd(s string, keywords []string) bool {
+	if len(keywords) == 0 {
+		return false
+	}
+	lowerS := strings.ToLower(s)
+	for _, keyword := range keywords {
+		if !strings.Contains(lowerS, strings.ToLower(keyword)) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchContentOr 任一关键字匹配即可（OR 逻辑）
+func matchContentOr(s string, keywords []string) bool {
+	if len(keywords) == 0 {
+		return false
+	}
+	lowerS := strings.ToLower(s)
+	for _, keyword := range keywords {
+		if strings.Contains(lowerS, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchRegex 使用正则表达式匹配
+func matchRegex(s string, pattern *regexp.Regexp) bool {
+	if pattern == nil {
+		return false
+	}
+	return pattern.MatchString(s)
+}
+
+// CompileRegex 编译正则表达式
+func CompileRegex(pattern string) (*regexp.Regexp, error) {
+	if pattern == "" {
+		return nil, fmt.Errorf("正则表达式不能为空")
+	}
+	return regexp.Compile(pattern)
 }
 
 // resultCollector 内部结构体，减少转换开销

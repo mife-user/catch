@@ -3,6 +3,5 @@
     "allow": [
       "Bash(go *)"
     ]
-  },
-  "$version": 3
+  }
 }

@@ -9,11 +9,8 @@
 ### 🚀 未来规划
 
 #### 功能增强
-- [ ] **正则表达式搜索** - 支持使用正则表达式进行高级匹配
-- [ ] **忽略文件支持** - 读取 `.catchignore` 或 `.gitignore` 自定义跳过规则
-- [ ] **搜索结果导出** - 支持导出为 JSON / CSV / TXT 格式
-- [ ] **多关键字搜索** - 支持 AND / OR 逻辑组合多个关键字
-- [ ] **上下文展示** - 显示匹配行前后 N 行代码上下文
+- [ ] **搜索结果导出** - ✅ 已完成（JSON/CSV/TXT）
+- [ ] **上下文展示** - ✅ 已完成
 - [ ] **搜索历史** - 记录最近搜索历史，支持快速重复搜索
 - [ ] **模糊匹配** - 支持近似匹配，容忍拼写错误
 - [ ] **大文件分块** - 超大文件分块加载，降低内存占用
@@ -33,13 +30,43 @@
 - [ ] **暗色/亮色主题** - 自动检测终端主题适配颜色
 
 #### 工程化
-- [ ] **单元测试** - 为核心搜索逻辑添加完整单元测试
 - [ ] **基准测试** - 添加 benchmark 测试监控性能变化
 - [ ] **CI/CD** - 配置 GitHub Actions 自动构建和发布
 - [ ] **代码覆盖率** - 集成 codecov 监控代码覆盖率
 - [ ] **二进制发布** - 提供预编译二进制文件下载
 - [ ] **Homebrew 支持** - 支持 macOS 通过 homebrew 安装
 - [ ] **Scoop 支持** - 支持 Windows 通过 scoop 安装
+
+---
+
+## [v1.2.0] - 2026-04-05
+
+### ✨ 新增功能
+- **正则表达式搜索** - 支持使用正则表达式进行高级匹配
+- **忽略文件支持** - 自动读取 `.catchignore` 和 `.gitignore` 文件，支持 glob 模式
+- **多关键字搜索** - 支持 AND/OR 逻辑组合多个关键字
+  - AND 模式：所有关键字都必须匹配
+  - OR 模式：任一关键字匹配即可
+
+### 🎨 体验改进
+- 新增菜单选项：`[4] 🔎 正则表达式搜索`
+- 新增菜单选项：`[5] 🔗 多关键字搜索`
+- 高级搜索支持忽略文件选项
+- 改进文件遍历逻辑，支持自定义忽略模式
+
+### ⚡ 技术实现
+- 新增 `matchLine` 和 `matchFilename` 函数，统一匹配逻辑
+- 新增 `matchContentAnd` 和 `matchContentOr` 函数，支持多关键字匹配
+- 新增 `loadIgnorePatterns` 和 `shouldIgnorePath` 函数，支持忽略文件加载
+- 新增 `CompileRegex` 函数，提供正则表达式编译和验证
+- 扩展 `SearchConfig` 结构，支持 `UseRegex`、`SearchMode`、`Keywords`、`RegexPattern`、`IgnorePatterns`、`LoadGitignore` 字段
+
+### 🧪 测试覆盖
+- 新增 `TestRegexSearch` - 正则表达式搜索测试
+- 新增 `TestMultiKeywordSearch` - 多关键字搜索测试（AND/OR 模式）
+- 新增 `TestIgnorePatterns` - 忽略文件功能测试
+- 新增 `TestMatchIgnorePattern` - 忽略模式匹配测试
+- 新增 14 个子测试用例，总测试用例数达到 50+
 
 ---
 

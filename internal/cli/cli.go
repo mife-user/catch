@@ -76,7 +76,9 @@ func runTerminalUI(reader *bufio.Reader, writer *SimpleWriter) {
 		{Title: "🔍 搜索文件内容", Action: func() { searchContent(reader, writer) }, Shortcut: "1"},
 		{Title: "📁 搜索文件名", Action: func() { searchFilename(reader, writer) }, Shortcut: "2"},
 		{Title: "⚙️  高级搜索", Action: func() { advancedSearch(reader, writer) }, Shortcut: "3"},
-		{Title: "➕ 添加到环境变量", Action: func() { AddToPath(writer) }, Shortcut: "4"},
+		{Title: "🔎 正则表达式搜索", Action: func() { regexSearch(reader, writer) }, Shortcut: "4"},
+		{Title: "🔗 多关键字搜索", Action: func() { multiKeywordSearch(reader, writer) }, Shortcut: "5"},
+		{Title: "➕ 添加到环境变量", Action: func() { AddToPath(writer) }, Shortcut: "6"},
 		{Title: "❌ 退出", Action: func() {}, Shortcut: "q"},
 	}
 
@@ -90,7 +92,7 @@ func runTerminalUI(reader *bufio.Reader, writer *SimpleWriter) {
 
 	for {
 		printMenu(writer, menuItems)
-		writer.WriteString("\n请选择功能 (1-4 或 q): ")
+		writer.WriteString("\n请选择功能 (1-6 或 q): ")
 		writer.Flush()
 
 		input := readLine(reader)
@@ -585,6 +587,12 @@ func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		}
 	}
 
+	writer.WriteString("是否加载 .gitignore 和 .catchignore 文件？(y/n): ")
+	writer.Flush()
+
+	ignoreInput := readLine(reader)
+	loadGitignore := strings.TrimSpace(strings.ToLower(ignoreInput)) == "y"
+
 	// 创建带超时的 context（120秒超时）
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -599,6 +607,7 @@ func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		MaxGoroutine: goroutines,
 		ContextLines: contextLines,
 		Context:      ctx,
+		LoadGitignore: loadGitignore,
 		ProgressCallback: func(stats search.ScanStats) {
 			if stats.FilesScanned%50 == 0 {
 				elapsed := time.Since(startTime)
@@ -870,3 +879,282 @@ func addToPathUnix(path string, writer *SimpleWriter) {
 	writer.WriteString("✅ 已添加到 ~/.bashrc，请执行 'source ~/.bashrc' 生效\n")
 	writer.Flush()
 }
+
+// regexSearch 正则表达式搜索
+func regexSearch(reader *bufio.Reader, writer *SimpleWriter) {
+	writer.WriteString("请输入正则表达式：")
+	writer.Flush()
+
+	pattern := readLine(reader)
+	pattern = strings.TrimSpace(pattern)
+
+	if pattern == "" {
+		writer.WriteString("❌ 正则表达式不能为空\n")
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
+	// 编译正则表达式
+	regexPattern, err := search.CompileRegex(pattern)
+	if err != nil {
+		writer.WriteString(fmt.Sprintf("❌ 正则表达式编译失败: %v\n", err))
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
+	writer.WriteString("是否递归搜索子目录？(y/n): ")
+	writer.Flush()
+
+	recInput := readLine(reader)
+	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
+
+	// 验证路径
+	searchPath := "."
+	if _, err := os.Stat(searchPath); err != nil {
+		writer.WriteString(fmt.Sprintf("❌ 路径不存在：%s\n", searchPath))
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
+	writer.WriteString("是否使用分页显示？(y/n): ")
+	writer.Flush()
+
+	pagedInput := readLine(reader)
+	usePaged := strings.TrimSpace(strings.ToLower(pagedInput)) == "y"
+
+	pageSize := 10
+	if usePaged {
+		writer.WriteString("每页显示条数 (默认 10): ")
+		writer.Flush()
+
+		pageSizeInput := readLine(reader)
+		if size, err := strconv.Atoi(strings.TrimSpace(pageSizeInput)); err == nil && size > 0 {
+			pageSize = size
+			if pageSize > 100 {
+				pageSize = 100
+			}
+		}
+	}
+
+	writer.WriteString("显示上下文行数 (默认 0，不显示): ")
+	writer.Flush()
+
+	contextLinesInput := readLine(reader)
+	contextLines, _ := strconv.Atoi(strings.TrimSpace(contextLinesInput))
+	if contextLines < 0 {
+		contextLines = 0
+	}
+
+	// 创建带超时的 context（60秒超时）
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	startTime := time.Now()
+
+	config := search.SearchConfig{
+		Keyword:      pattern,
+		Path:         searchPath,
+		Recursive:    recursive,
+		MaxGoroutine: 10,
+		ContextLines: contextLines,
+		Context:      ctx,
+		UseRegex:     true,
+		RegexPattern: regexPattern,
+		ProgressCallback: func(stats search.ScanStats) {
+			if stats.FilesScanned%50 == 0 {
+				elapsed := time.Since(startTime)
+				speed := float64(stats.FilesScanned) / elapsed.Seconds()
+				writer.WriteString(fmt.Sprintf("\r📊 进度: 已扫描 %d 个文件，匹配 %d 个，速度 %.0f 文件/秒",
+					stats.FilesScanned, stats.FilesMatched, speed))
+				writer.Flush()
+			}
+		},
+	}
+
+	writer.WriteString("\n🔍 正在搜索...\n")
+	writer.Flush()
+
+	// 收集所有结果
+	results := search.Search(config)
+
+	// 清除最后的进度行
+	writer.WriteString("\r" + strings.Repeat(" ", 80) + "\r")
+
+	elapsed := time.Since(startTime)
+	totalCount := len(results)
+
+	if totalCount == 0 {
+		writer.WriteString("未找到匹配的结果\n")
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
+	writer.WriteString(fmt.Sprintf("✅ 找到 %d 个匹配结果，耗时 %v\n", totalCount, elapsed.Round(time.Millisecond)))
+	writer.Flush()
+
+	if usePaged {
+		displayPagedResults(writer, results, pattern, pageSize)
+	} else {
+		search.PrintResults(results, pattern)
+	}
+
+	writer.Flush()
+	pause(writer)
+}
+
+// multiKeywordSearch 多关键字搜索
+func multiKeywordSearch(reader *bufio.Reader, writer *SimpleWriter) {
+	writer.WriteString("请输入多个关键字（用逗号分隔）：")
+	writer.Flush()
+
+	input := readLine(reader)
+	input = strings.TrimSpace(input)
+
+	if input == "" {
+		writer.WriteString("❌ 关键字不能为空\n")
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
+	// 解析关键字
+	keywords := strings.Split(input, ",")
+	for i, kw := range keywords {
+		keywords[i] = strings.TrimSpace(kw)
+	}
+	// 过滤空关键字
+	var validKeywords []string
+	for _, kw := range keywords {
+		if kw != "" {
+			validKeywords = append(validKeywords, kw)
+		}
+	}
+
+	if len(validKeywords) == 0 {
+		writer.WriteString("❌ 至少需要一个有效关键字\n")
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
+	// 选择搜索模式
+	writer.WriteString("请选择搜索模式 (1: AND - 所有关键字都必须匹配, 2: OR - 任一关键字匹配即可): ")
+	writer.Flush()
+
+	modeInput := strings.TrimSpace(readLine(reader))
+	searchMode := "multi_and"
+	modeDesc := "AND"
+	if modeInput == "2" {
+		searchMode = "multi_or"
+		modeDesc = "OR"
+	}
+
+	writer.WriteString("是否递归搜索子目录？(y/n): ")
+	writer.Flush()
+
+	recInput := readLine(reader)
+	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
+
+	// 验证路径
+	searchPath := "."
+	if _, err := os.Stat(searchPath); err != nil {
+		writer.WriteString(fmt.Sprintf("❌ 路径不存在：%s\n", searchPath))
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
+	writer.WriteString("是否使用分页显示？(y/n): ")
+	writer.Flush()
+
+	pagedInput := readLine(reader)
+	usePaged := strings.TrimSpace(strings.ToLower(pagedInput)) == "y"
+
+	pageSize := 10
+	if usePaged {
+		writer.WriteString("每页显示条数 (默认 10): ")
+		writer.Flush()
+
+		pageSizeInput := readLine(reader)
+		if size, err := strconv.Atoi(strings.TrimSpace(pageSizeInput)); err == nil && size > 0 {
+			pageSize = size
+			if pageSize > 100 {
+				pageSize = 100
+			}
+		}
+	}
+
+	writer.WriteString("显示上下文行数 (默认 0，不显示): ")
+	writer.Flush()
+
+	contextLinesInput := readLine(reader)
+	contextLines, _ := strconv.Atoi(strings.TrimSpace(contextLinesInput))
+	if contextLines < 0 {
+		contextLines = 0
+	}
+
+	// 创建带超时的 context（60秒超时）
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	startTime := time.Now()
+
+	// 组合关键字用于显示
+	combinedKeyword := strings.Join(validKeywords, fmt.Sprintf(" [%s] ", modeDesc))
+
+	config := search.SearchConfig{
+		Keyword:      combinedKeyword,
+		Path:         searchPath,
+		Recursive:    recursive,
+		MaxGoroutine: 10,
+		ContextLines: contextLines,
+		Context:      ctx,
+		SearchMode:   searchMode,
+		Keywords:     validKeywords,
+		ProgressCallback: func(stats search.ScanStats) {
+			if stats.FilesScanned%50 == 0 {
+				elapsed := time.Since(startTime)
+				speed := float64(stats.FilesScanned) / elapsed.Seconds()
+				writer.WriteString(fmt.Sprintf("\r📊 进度: 已扫描 %d 个文件，匹配 %d 个，速度 %.0f 文件/秒",
+					stats.FilesScanned, stats.FilesMatched, speed))
+				writer.Flush()
+			}
+		},
+	}
+
+	writer.WriteString("\n🔍 正在搜索...\n")
+	writer.Flush()
+
+	// 收集所有结果
+	results := search.Search(config)
+
+	// 清除最后的进度行
+	writer.WriteString("\r" + strings.Repeat(" ", 80) + "\r")
+
+	elapsed := time.Since(startTime)
+	totalCount := len(results)
+
+	if totalCount == 0 {
+		writer.WriteString("未找到匹配的结果\n")
+		writer.Flush()
+		pause(writer)
+		return
+	}
+
+	writer.WriteString(fmt.Sprintf("✅ 找到 %d 个匹配结果，耗时 %v\n", totalCount, elapsed.Round(time.Millisecond)))
+	writer.Flush()
+
+	if usePaged {
+		displayPagedResults(writer, results, combinedKeyword, pageSize)
+	} else {
+		search.PrintResults(results, combinedKeyword)
+	}
+
+	writer.Flush()
+	pause(writer)
+}
+

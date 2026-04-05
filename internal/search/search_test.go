@@ -545,3 +545,257 @@ No match here`,
 		}
 	})
 }
+
+// TestRegexSearch 测试正则表达式搜索
+func TestRegexSearch(t *testing.T) {
+	// 创建临时测试目录
+	testDir := t.TempDir()
+
+	// 创建测试文件
+	content := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("hello world")
+	fmt.Println("Hello World")
+	fmt.Println("HELLO WORLD")
+}
+`
+	testFile := filepath.Join(testDir, "test.go")
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	t.Run("正则表达式匹配", func(t *testing.T) {
+		pattern, err := CompileRegex(`fmt\.Println\("hello`)
+		if err != nil {
+			t.Fatalf("Failed to compile regex: %v", err)
+		}
+
+		config := SearchConfig{
+			Keyword:      `fmt\.Println\("hello`,
+			Path:         testDir,
+			Recursive:    false,
+			UseRegex:     true,
+			RegexPattern: pattern,
+		}
+
+		results := Search(config)
+		if len(results) == 0 {
+			t.Error("Expected results for regex search")
+		}
+
+		// 验证匹配的行
+		if len(results) > 0 && len(results[0].Lines) == 0 {
+			t.Error("Expected matched lines in result")
+		}
+	})
+
+	t.Run("无效正则表达式", func(t *testing.T) {
+		_, err := CompileRegex(`[invalid`)
+		if err == nil {
+			t.Error("Expected error for invalid regex pattern")
+		}
+	})
+}
+
+// TestMultiKeywordSearch 测试多关键字搜索
+func TestMultiKeywordSearch(t *testing.T) {
+	// 创建临时测试目录
+	testDir := t.TempDir()
+
+	// 创建测试文件
+	content := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("hello world")
+	fmt.Println("test function")
+	fmt.Println("hello test")
+}
+`
+	testFile := filepath.Join(testDir, "test.go")
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	t.Run("AND 模式 - 所有关键字都匹配", func(t *testing.T) {
+		config := SearchConfig{
+			Keyword:    "hello [AND] test",
+			Path:       testDir,
+			Recursive:  false,
+			SearchMode: "multi_and",
+			Keywords:   []string{"hello", "test"},
+		}
+
+		results := Search(config)
+		if len(results) == 0 {
+			t.Error("Expected results for AND mode search")
+		}
+
+		// AND 模式应该只匹配包含所有关键字的行
+		if len(results) > 0 {
+			found := false
+			for _, line := range results[0].Lines {
+				if containsIgnoreCase(line, "hello") && containsIgnoreCase(line, "test") {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Error("Expected line containing both 'hello' and 'test' in AND mode")
+			}
+		}
+	})
+
+	t.Run("OR 模式 - 任一关键字匹配", func(t *testing.T) {
+		config := SearchConfig{
+			Keyword:    "hello [OR] world",
+			Path:       testDir,
+			Recursive:  false,
+			SearchMode: "multi_or",
+			Keywords:   []string{"hello", "world"},
+		}
+
+		results := Search(config)
+		if len(results) == 0 {
+			t.Error("Expected results for OR mode search")
+		}
+
+		// OR 模式应该匹配包含任一关键字的行
+		if len(results) > 0 {
+			for _, line := range results[0].Lines {
+				if !containsIgnoreCase(line, "hello") && !containsIgnoreCase(line, "world") {
+					t.Errorf("Expected line containing 'hello' or 'world', got: %s", line)
+				}
+			}
+		}
+	})
+
+	t.Run("空关键字列表", func(t *testing.T) {
+		result := matchContentAnd("test", []string{})
+		if result {
+			t.Error("Expected false for empty keywords in AND mode")
+		}
+
+		result = matchContentOr("test", []string{})
+		if result {
+			t.Error("Expected false for empty keywords in OR mode")
+		}
+	})
+}
+
+// TestIgnorePatterns 测试忽略文件功能
+func TestIgnorePatterns(t *testing.T) {
+	// 创建临时测试目录
+	testDir := t.TempDir()
+
+	// 创建测试文件
+	files := map[string]string{
+		"test1.go":    "package main",
+		"test2.go":    "package main",
+		"test.txt":    "text content",
+		"ignore.go":   "package main",
+		".hidden.txt": "hidden file",
+	}
+
+	for name, content := range files {
+		filePath := filepath.Join(testDir, name)
+		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			t.Fatalf("Failed to create test file %s: %v", name, err)
+		}
+	}
+
+	// 创建 .gitignore 文件
+	gitignoreContent := `ignore.go
+*.txt
+`
+	gitignorePath := filepath.Join(testDir, ".gitignore")
+	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
+		t.Fatalf("Failed to create .gitignore: %v", err)
+	}
+
+	t.Run("加载 .gitignore", func(t *testing.T) {
+		patterns := loadIgnorePatterns(testDir)
+		if len(patterns) == 0 {
+			t.Error("Expected patterns from .gitignore")
+		}
+
+		// 验证模式是否正确加载
+		found := false
+		for _, p := range patterns {
+			if p == "ignore.go" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("Expected 'ignore.go' pattern in loaded patterns")
+		}
+	})
+
+	t.Run("shouldIgnorePath 测试", func(t *testing.T) {
+		patterns := []string{"ignore.go", "*.txt"}
+
+		if !shouldIgnorePath("ignore.go", patterns) {
+			t.Error("Expected 'ignore.go' to be ignored")
+		}
+
+		if !shouldIgnorePath("test.txt", patterns) {
+			t.Error("Expected '*.txt' to match 'test.txt'")
+		}
+
+		if shouldIgnorePath("test.go", patterns) {
+			t.Error("Did not expect 'test.go' to be ignored")
+		}
+	})
+
+	t.Run("搜索时应用忽略模式", func(t *testing.T) {
+		config := SearchConfig{
+			Keyword:       "package",
+			Path:          testDir,
+			Recursive:     false,
+			LoadGitignore: true,
+		}
+
+		results := Search(config)
+
+		// 验证 ignore.go 和 test.txt 被忽略
+		for _, result := range results {
+			if filepath.Base(result.FilePath) == "ignore.go" {
+				t.Error("Expected 'ignore.go' to be ignored in search results")
+			}
+			if filepath.Base(result.FilePath) == "test.txt" {
+				t.Error("Expected '*.txt' files to be ignored in search results")
+			}
+		}
+	})
+}
+
+// TestMatchIgnorePattern 测试忽略模式匹配
+func TestMatchIgnorePattern(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		pattern string
+		want    bool
+	}{
+		{"精确匹配", "test.go", "test.go", true},
+		{"后缀匹配", "src/test.go", "test.go", true},
+		{"前缀匹配", "test.min.js", "*.min.js", true},
+		{"不匹配", "test.go", "ignore.go", false},
+		{"目录后缀匹配", "src/build", "build/", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchIgnorePattern(tt.path, tt.pattern)
+			if got != tt.want {
+				t.Errorf("matchIgnorePattern(%q, %q) = %v, want %v", tt.path, tt.pattern, got, tt.want)
+			}
+		})
+	}
+}
+
