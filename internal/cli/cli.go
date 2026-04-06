@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bufio"
+	"catch/internal/config"
+	"catch/internal/history"
 	"catch/internal/search"
 	"context"
 	"fmt"
@@ -72,13 +74,31 @@ func RunInteractive() {
 }
 
 func runTerminalUI(reader *bufio.Reader, writer *SimpleWriter) {
+	// 加载配置
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		writer.WriteString(fmt.Sprintf("⚠️  加载配置失败，使用默认配置: %v\n", err))
+		writer.Flush()
+		cfg = config.GetDefaultConfig()
+	}
+
+	// 加载历史记录
+	historyMgr, err := history.NewHistoryManager(cfg.HistoryMaxEntries)
+	if err != nil {
+		writer.WriteString(fmt.Sprintf("⚠️  加载历史记录失败: %v\n", err))
+		writer.Flush()
+		historyMgr = nil
+	}
+
 	menuItems := []MenuItem{
-		{Title: "🔍 搜索文件内容", Action: func() { searchContent(reader, writer) }, Shortcut: "1"},
-		{Title: "📁 搜索文件名", Action: func() { searchFilename(reader, writer) }, Shortcut: "2"},
-		{Title: "⚙️  高级搜索", Action: func() { advancedSearch(reader, writer) }, Shortcut: "3"},
-		{Title: "🔎 正则表达式搜索", Action: func() { regexSearch(reader, writer) }, Shortcut: "4"},
-		{Title: "🔗 多关键字搜索", Action: func() { multiKeywordSearch(reader, writer) }, Shortcut: "5"},
-		{Title: "➕ 添加到环境变量", Action: func() { AddToPath(writer) }, Shortcut: "6"},
+		{Title: "🔍 搜索文件内容", Action: func() { searchContent(reader, writer, cfg, historyMgr) }, Shortcut: "1"},
+		{Title: "📁 搜索文件名", Action: func() { searchFilename(reader, writer, cfg, historyMgr) }, Shortcut: "2"},
+		{Title: "⚙️  高级搜索", Action: func() { advancedSearch(reader, writer, cfg, historyMgr) }, Shortcut: "3"},
+		{Title: "🔎 正则表达式搜索", Action: func() { regexSearch(reader, writer, cfg, historyMgr) }, Shortcut: "4"},
+		{Title: "🔗 多关键字搜索", Action: func() { multiKeywordSearch(reader, writer, cfg, historyMgr) }, Shortcut: "5"},
+		{Title: "📜 搜索历史", Action: func() { searchHistory(reader, writer, historyMgr, cfg) }, Shortcut: "6"},
+		{Title: "⚙️  配置管理", Action: func() { configManager(reader, writer, cfg) }, Shortcut: "7"},
+		{Title: "➕ 添加到环境变量", Action: func() { AddToPath(writer) }, Shortcut: "8"},
 		{Title: "❌ 退出", Action: func() {}, Shortcut: "q"},
 	}
 
@@ -92,7 +112,7 @@ func runTerminalUI(reader *bufio.Reader, writer *SimpleWriter) {
 
 	for {
 		printMenu(writer, menuItems)
-		writer.WriteString("\n请选择功能 (1-6 或 q): ")
+		writer.WriteString("\n请选择功能 (1-8 或 q): ")
 		writer.Flush()
 
 		input := readLine(reader)
@@ -120,6 +140,22 @@ func runTerminalUI(reader *bufio.Reader, writer *SimpleWriter) {
 }
 
 func runSimpleUI(reader *bufio.Reader, writer *SimpleWriter) {
+	// 加载配置
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		writer.WriteString(fmt.Sprintf("⚠️  加载配置失败，使用默认配置: %v\n", err))
+		writer.Flush()
+		cfg = config.GetDefaultConfig()
+	}
+
+	// 加载历史记录
+	historyMgr, err := history.NewHistoryManager(cfg.HistoryMaxEntries)
+	if err != nil {
+		writer.WriteString(fmt.Sprintf("⚠️  加载历史记录失败: %v\n", err))
+		writer.Flush()
+		historyMgr = nil
+	}
+
 	writer.WriteString("=== Catch - 文件搜索工具 ===\n\n")
 	writer.WriteString("1. 搜索文件内容\n")
 	writer.WriteString("2. 搜索文件名\n")
@@ -143,11 +179,11 @@ func runSimpleUI(reader *bufio.Reader, writer *SimpleWriter) {
 
 		switch input {
 		case "1":
-			searchContent(reader, writer)
+			searchContent(reader, writer, cfg, historyMgr)
 		case "2":
-			searchFilename(reader, writer)
+			searchFilename(reader, writer, cfg, historyMgr)
 		case "3":
-			advancedSearch(reader, writer)
+			advancedSearch(reader, writer, cfg, historyMgr)
 		case "4":
 			AddToPath(writer)
 		default:
@@ -243,7 +279,7 @@ func getDisplayWidth(s string) int {
 	return width
 }
 
-func searchContent(reader *bufio.Reader, writer *SimpleWriter) {
+func searchContent(reader *bufio.Reader, writer *SimpleWriter, cfg *config.Config, historyMgr *history.HistoryManager) {
 	writer.WriteString("请输入搜索关键字：")
 	writer.Flush()
 
@@ -257,11 +293,16 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter) {
 		return
 	}
 
-	writer.WriteString("是否递归搜索子目录？(y/n): ")
+	writer.WriteString(fmt.Sprintf("是否递归搜索子目录？(y/n, 默认 %v): ", cfg.DefaultRecursive))
 	writer.Flush()
 
 	recInput := readLine(reader)
-	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
+	recursive := cfg.DefaultRecursive
+	if strings.TrimSpace(strings.ToLower(recInput)) == "y" {
+		recursive = true
+	} else if strings.TrimSpace(strings.ToLower(recInput)) == "n" {
+		recursive = false
+	}
 
 	// 验证路径
 	searchPath := "."
@@ -272,15 +313,18 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter) {
 		return
 	}
 
-	writer.WriteString("是否使用分页显示？(y/n): ")
+	writer.WriteString("是否使用分页显示？(y/n, 默认 y): ")
 	writer.Flush()
 
 	pagedInput := readLine(reader)
-	usePaged := strings.TrimSpace(strings.ToLower(pagedInput)) == "y"
+	usePaged := true
+	if strings.TrimSpace(strings.ToLower(pagedInput)) == "n" {
+		usePaged = false
+	}
 
-	pageSize := 10
+	pageSize := cfg.DefaultPageSize
 	if usePaged {
-		writer.WriteString("每页显示条数 (默认 10): ")
+		writer.WriteString(fmt.Sprintf("每页显示条数 (默认 %d): ", cfg.DefaultPageSize))
 		writer.Flush()
 
 		pageSizeInput := readLine(reader)
@@ -292,13 +336,23 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter) {
 		}
 	}
 
-	writer.WriteString("显示上下文行数 (默认 0，不显示): ")
+	writer.WriteString(fmt.Sprintf("显示上下文行数 (默认 %d, 不显示为 0): ", cfg.DefaultContextLines))
 	writer.Flush()
 
 	contextLinesInput := readLine(reader)
-	contextLines, _ := strconv.Atoi(strings.TrimSpace(contextLinesInput))
+	contextLines := cfg.DefaultContextLines
+	if strings.TrimSpace(contextLinesInput) != "" {
+		if val, err := strconv.Atoi(strings.TrimSpace(contextLinesInput)); err == nil {
+			contextLines = val
+		}
+	}
 	if contextLines < 0 {
 		contextLines = 0
+	}
+
+	maxGoroutines := cfg.DefaultMaxGoroutine
+	if maxGoroutines <= 0 {
+		maxGoroutines = 10
 	}
 
 	writer.WriteString("是否导出结果？(y/n): ")
@@ -335,7 +389,7 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter) {
 		Keyword:      keyword,
 		Path:         searchPath,
 		Recursive:    recursive,
-		MaxGoroutine: 10,
+		MaxGoroutine: maxGoroutines,
 		ContextLines: contextLines,
 		Context:      ctx,
 		ProgressCallback: func(stats search.ScanStats) {
@@ -398,7 +452,7 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter) {
 	pause(writer)
 }
 
-func searchFilename(reader *bufio.Reader, writer *SimpleWriter) {
+func searchFilename(reader *bufio.Reader, writer *SimpleWriter, cfg *config.Config, historyMgr *history.HistoryManager) {
 	writer.WriteString("请输入文件名关键字：")
 	writer.Flush()
 
@@ -412,11 +466,16 @@ func searchFilename(reader *bufio.Reader, writer *SimpleWriter) {
 		return
 	}
 
-	writer.WriteString("是否递归搜索子目录？(y/n): ")
+	writer.WriteString(fmt.Sprintf("是否递归搜索子目录？(y/n, 默认 %v): ", cfg.DefaultRecursive))
 	writer.Flush()
 
 	recInput := readLine(reader)
-	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
+	recursive := cfg.DefaultRecursive
+	if strings.TrimSpace(strings.ToLower(recInput)) == "y" {
+		recursive = true
+	} else if strings.TrimSpace(strings.ToLower(recInput)) == "n" {
+		recursive = false
+	}
 
 	// 验证路径
 	searchPath := "."
@@ -425,6 +484,11 @@ func searchFilename(reader *bufio.Reader, writer *SimpleWriter) {
 		writer.Flush()
 		pause(writer)
 		return
+	}
+
+	maxGoroutines := cfg.DefaultMaxGoroutine
+	if maxGoroutines <= 0 {
+		maxGoroutines = 10
 	}
 
 	// 创建带超时的 context（60秒超时）
@@ -437,7 +501,7 @@ func searchFilename(reader *bufio.Reader, writer *SimpleWriter) {
 		Keyword:      keyword,
 		Path:         searchPath,
 		Recursive:    recursive,
-		MaxGoroutine: 10,
+		MaxGoroutine: maxGoroutines,
 		Context:      ctx,
 		ProgressCallback: func(stats search.ScanStats) {
 			if stats.FilesScanned%50 == 0 {
@@ -477,7 +541,7 @@ func searchFilename(reader *bufio.Reader, writer *SimpleWriter) {
 	pause(writer)
 }
 
-func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
+func advancedSearch(reader *bufio.Reader, writer *SimpleWriter, cfg *config.Config, historyMgr *history.HistoryManager) {
 	writer.WriteString("请输入搜索关键字：")
 	writer.Flush()
 
@@ -508,11 +572,16 @@ func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		return
 	}
 
-	writer.WriteString("是否递归搜索子目录？(y/n): ")
+	writer.WriteString(fmt.Sprintf("是否递归搜索子目录？(y/n, 默认 %v): ", cfg.DefaultRecursive))
 	writer.Flush()
 
 	recInput := readLine(reader)
-	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
+	recursive := cfg.DefaultRecursive
+	if strings.TrimSpace(strings.ToLower(recInput)) == "y" {
+		recursive = true
+	} else if strings.TrimSpace(strings.ToLower(recInput)) == "n" {
+		recursive = false
+	}
 
 	writer.WriteString("文件类型过滤 (如：.go,.txt，留空表示全部): ")
 	writer.Flush()
@@ -520,29 +589,23 @@ func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
 	fileType := readLine(reader)
 	fileType = strings.TrimSpace(fileType)
 
-	writer.WriteString("并发协程数 (默认 10): ")
-	writer.Flush()
-
-	goroutineInput := readLine(reader)
-	goroutines, err := strconv.Atoi(strings.TrimSpace(goroutineInput))
-	if err != nil || goroutines <= 0 {
-		goroutines = 10
-	}
-	if goroutines > 100 {
-		goroutines = 100
-		writer.WriteString("⚠️  协程数已限制为 100\n")
-		writer.Flush()
+	maxGoroutines := cfg.DefaultMaxGoroutine
+	if maxGoroutines <= 0 {
+		maxGoroutines = 10
 	}
 
-	writer.WriteString("是否使用分页显示？(y/n): ")
+	writer.WriteString("是否使用分页显示？(y/n, 默认 y): ")
 	writer.Flush()
 
 	pagedInput := readLine(reader)
-	usePaged := strings.TrimSpace(strings.ToLower(pagedInput)) == "y"
+	usePaged := true
+	if strings.TrimSpace(strings.ToLower(pagedInput)) == "n" {
+		usePaged = false
+	}
 
-	pageSize := 10
+	pageSize := cfg.DefaultPageSize
 	if usePaged {
-		writer.WriteString("每页显示条数 (默认 10): ")
+		writer.WriteString(fmt.Sprintf("每页显示条数 (默认 %d): ", cfg.DefaultPageSize))
 		writer.Flush()
 
 		pageSizeInput := readLine(reader)
@@ -554,11 +617,16 @@ func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		}
 	}
 
-	writer.WriteString("显示上下文行数 (默认 0，不显示): ")
+	writer.WriteString(fmt.Sprintf("显示上下文行数 (默认 %d, 不显示为 0): ", cfg.DefaultContextLines))
 	writer.Flush()
 
 	contextLinesInput := readLine(reader)
-	contextLines, _ := strconv.Atoi(strings.TrimSpace(contextLinesInput))
+	contextLines := cfg.DefaultContextLines
+	if strings.TrimSpace(contextLinesInput) != "" {
+		if val, err := strconv.Atoi(strings.TrimSpace(contextLinesInput)); err == nil {
+			contextLines = val
+		}
+	}
 	if contextLines < 0 {
 		contextLines = 0
 	}
@@ -604,7 +672,7 @@ func advancedSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		Path:         path,
 		Recursive:    recursive,
 		FileType:     fileType,
-		MaxGoroutine: goroutines,
+		MaxGoroutine: maxGoroutines,
 		ContextLines: contextLines,
 		Context:      ctx,
 		LoadGitignore: loadGitignore,
@@ -881,7 +949,7 @@ func addToPathUnix(path string, writer *SimpleWriter) {
 }
 
 // regexSearch 正则表达式搜索
-func regexSearch(reader *bufio.Reader, writer *SimpleWriter) {
+func regexSearch(reader *bufio.Reader, writer *SimpleWriter, cfg *config.Config, historyMgr *history.HistoryManager) {
 	writer.WriteString("请输入正则表达式：")
 	writer.Flush()
 
@@ -904,11 +972,16 @@ func regexSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		return
 	}
 
-	writer.WriteString("是否递归搜索子目录？(y/n): ")
+	writer.WriteString(fmt.Sprintf("是否递归搜索子目录？(y/n, 默认 %v): ", cfg.DefaultRecursive))
 	writer.Flush()
 
 	recInput := readLine(reader)
-	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
+	recursive := cfg.DefaultRecursive
+	if strings.TrimSpace(strings.ToLower(recInput)) == "y" {
+		recursive = true
+	} else if strings.TrimSpace(strings.ToLower(recInput)) == "n" {
+		recursive = false
+	}
 
 	// 验证路径
 	searchPath := "."
@@ -919,15 +992,18 @@ func regexSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		return
 	}
 
-	writer.WriteString("是否使用分页显示？(y/n): ")
+	writer.WriteString("是否使用分页显示？(y/n, 默认 y): ")
 	writer.Flush()
 
 	pagedInput := readLine(reader)
-	usePaged := strings.TrimSpace(strings.ToLower(pagedInput)) == "y"
+	usePaged := true
+	if strings.TrimSpace(strings.ToLower(pagedInput)) == "n" {
+		usePaged = false
+	}
 
-	pageSize := 10
+	pageSize := cfg.DefaultPageSize
 	if usePaged {
-		writer.WriteString("每页显示条数 (默认 10): ")
+		writer.WriteString(fmt.Sprintf("每页显示条数 (默认 %d): ", cfg.DefaultPageSize))
 		writer.Flush()
 
 		pageSizeInput := readLine(reader)
@@ -939,13 +1015,23 @@ func regexSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		}
 	}
 
-	writer.WriteString("显示上下文行数 (默认 0，不显示): ")
+	writer.WriteString(fmt.Sprintf("显示上下文行数 (默认 %d, 不显示为 0): ", cfg.DefaultContextLines))
 	writer.Flush()
 
 	contextLinesInput := readLine(reader)
-	contextLines, _ := strconv.Atoi(strings.TrimSpace(contextLinesInput))
+	contextLines := cfg.DefaultContextLines
+	if strings.TrimSpace(contextLinesInput) != "" {
+		if val, err := strconv.Atoi(strings.TrimSpace(contextLinesInput)); err == nil {
+			contextLines = val
+		}
+	}
 	if contextLines < 0 {
 		contextLines = 0
+	}
+
+	maxGoroutines := cfg.DefaultMaxGoroutine
+	if maxGoroutines <= 0 {
+		maxGoroutines = 10
 	}
 
 	// 创建带超时的 context（60秒超时）
@@ -958,7 +1044,7 @@ func regexSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		Keyword:      pattern,
 		Path:         searchPath,
 		Recursive:    recursive,
-		MaxGoroutine: 10,
+		MaxGoroutine: maxGoroutines,
 		ContextLines: contextLines,
 		Context:      ctx,
 		UseRegex:     true,
@@ -1007,7 +1093,7 @@ func regexSearch(reader *bufio.Reader, writer *SimpleWriter) {
 }
 
 // multiKeywordSearch 多关键字搜索
-func multiKeywordSearch(reader *bufio.Reader, writer *SimpleWriter) {
+func multiKeywordSearch(reader *bufio.Reader, writer *SimpleWriter, cfg *config.Config, historyMgr *history.HistoryManager) {
 	writer.WriteString("请输入多个关键字（用逗号分隔）：")
 	writer.Flush()
 
@@ -1053,11 +1139,16 @@ func multiKeywordSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		modeDesc = "OR"
 	}
 
-	writer.WriteString("是否递归搜索子目录？(y/n): ")
+	writer.WriteString(fmt.Sprintf("是否递归搜索子目录？(y/n, 默认 %v): ", cfg.DefaultRecursive))
 	writer.Flush()
 
 	recInput := readLine(reader)
-	recursive := strings.TrimSpace(strings.ToLower(recInput)) == "y"
+	recursive := cfg.DefaultRecursive
+	if strings.TrimSpace(strings.ToLower(recInput)) == "y" {
+		recursive = true
+	} else if strings.TrimSpace(strings.ToLower(recInput)) == "n" {
+		recursive = false
+	}
 
 	// 验证路径
 	searchPath := "."
@@ -1068,15 +1159,18 @@ func multiKeywordSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		return
 	}
 
-	writer.WriteString("是否使用分页显示？(y/n): ")
+	writer.WriteString("是否使用分页显示？(y/n, 默认 y): ")
 	writer.Flush()
 
 	pagedInput := readLine(reader)
-	usePaged := strings.TrimSpace(strings.ToLower(pagedInput)) == "y"
+	usePaged := true
+	if strings.TrimSpace(strings.ToLower(pagedInput)) == "n" {
+		usePaged = false
+	}
 
-	pageSize := 10
+	pageSize := cfg.DefaultPageSize
 	if usePaged {
-		writer.WriteString("每页显示条数 (默认 10): ")
+		writer.WriteString(fmt.Sprintf("每页显示条数 (默认 %d): ", cfg.DefaultPageSize))
 		writer.Flush()
 
 		pageSizeInput := readLine(reader)
@@ -1088,13 +1182,23 @@ func multiKeywordSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		}
 	}
 
-	writer.WriteString("显示上下文行数 (默认 0，不显示): ")
+	writer.WriteString(fmt.Sprintf("显示上下文行数 (默认 %d, 不显示为 0): ", cfg.DefaultContextLines))
 	writer.Flush()
 
 	contextLinesInput := readLine(reader)
-	contextLines, _ := strconv.Atoi(strings.TrimSpace(contextLinesInput))
+	contextLines := cfg.DefaultContextLines
+	if strings.TrimSpace(contextLinesInput) != "" {
+		if val, err := strconv.Atoi(strings.TrimSpace(contextLinesInput)); err == nil {
+			contextLines = val
+		}
+	}
 	if contextLines < 0 {
 		contextLines = 0
+	}
+
+	maxGoroutines := cfg.DefaultMaxGoroutine
+	if maxGoroutines <= 0 {
+		maxGoroutines = 10
 	}
 
 	// 创建带超时的 context（60秒超时）
@@ -1110,7 +1214,7 @@ func multiKeywordSearch(reader *bufio.Reader, writer *SimpleWriter) {
 		Keyword:      combinedKeyword,
 		Path:         searchPath,
 		Recursive:    recursive,
-		MaxGoroutine: 10,
+		MaxGoroutine: maxGoroutines,
 		ContextLines: contextLines,
 		Context:      ctx,
 		SearchMode:   searchMode,
