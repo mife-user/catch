@@ -30,6 +30,20 @@
 
 ---
 
+## [v1.3.1] - 2026-04-07
+
+### 🐛 Bug 修复
+- 修复跨平台编译错误，将 Windows 特定代码移到 `init_windows.go`
+- 修复 release workflow checksums 生成路径错误
+- 添加缺失的 `cmd/catch/main.go` 到仓库
+
+### 🔧 工程化改进
+- 优化 CI 配置，添加 `tags-ignore` 避免 tag 推送时重复触发 workflow
+- 改进 Release Notes 提取逻辑，使用更可靠的 `sed` 命令
+- 添加调试输出，便于排查构建问题
+
+---
+
 ## [v1.3.0] - 2026-04-07
 
 ### ✨ 新增功能
