@@ -36,7 +36,8 @@ type SearchConfig struct {
 	Path             string
 	Recursive        bool
 	FileType         string
-	MaxGoroutine     int
+	MaxGoroutine     int                   // 文件搜索并发数
+	MaxDirGoroutine  int                   // 目录遍历并发数
 	MaxFileSize      int64                 // 最大文件大小限制（字节），默认 10MB
 	MaxMatches       int                   // 单文件最大匹配行数，默认 100
 	ContextLines     int                   // 上下文行数，默认 0（不显示上下文）
@@ -234,7 +235,7 @@ func collectFiles(config SearchConfig) []fileTask {
 	return tasks
 }
 
-// collectFilesStreaming 流式收集文件并发送到通道（生产者模式）
+// collectFilesStreaming 流式收集文件并发送到通道（生产者模式 - 并发目录遍历）
 func collectFilesStreaming(ctx context.Context, config SearchConfig, taskChan chan<- fileTask) {
 	defer close(taskChan)
 
@@ -248,23 +249,61 @@ func collectFilesStreaming(ctx context.Context, config SearchConfig, taskChan ch
 		ignorePatterns = append(ignorePatterns, config.IgnorePatterns...)
 	}
 
-	var walkDir func(dir string) bool
-	walkDir = func(dir string) bool {
+	// 设置目录遍历并发数
+	maxDirGoroutines := config.MaxDirGoroutine
+	if maxDirGoroutines <= 0 {
+		maxDirGoroutines = 5 // 默认 5 个并发目录
+	}
+
+	// 使用信号量控制并发
+	dirSemaphore := make(chan struct{}, maxDirGoroutines)
+
+	var wg sync.WaitGroup
+
+	// 并发遍历目录
+	walkDirConcurrent(ctx, config.Path, config, ignorePatterns, taskChan, &wg, dirSemaphore)
+	wg.Wait()
+}
+
+// walkDirConcurrent 并发遍历目录
+func walkDirConcurrent(
+	ctx context.Context,
+	dir string,
+	config SearchConfig,
+	ignorePatterns []string,
+	taskChan chan<- fileTask,
+	wg *sync.WaitGroup,
+	semaphore chan struct{},
+) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		// 获取信号量
+		select {
+		case semaphore <- struct{}{}:
+			defer func() { <-semaphore }()
+		case <-ctx.Done():
+			return
+		}
+
 		select {
 		case <-ctx.Done():
-			return false // 取消
+			return
 		default:
 		}
 
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return true
+			return
 		}
 
+		// 先处理文件，再处理目录
+		var subDirs []os.DirEntry
 		for _, entry := range entries {
 			select {
 			case <-ctx.Done():
-				return false // 取消
+				return
 			default:
 			}
 
@@ -284,9 +323,7 @@ func collectFilesStreaming(ctx context.Context, config SearchConfig, taskChan ch
 					continue
 				}
 				if config.Recursive {
-					if !walkDir(fullPath) {
-						return false
-					}
+					subDirs = append(subDirs, entry)
 				}
 			} else {
 				// 跳过符号链接文件
@@ -321,14 +358,23 @@ func collectFilesStreaming(ctx context.Context, config SearchConfig, taskChan ch
 				select {
 				case taskChan <- fileTask{path: fullPath, config: config}:
 				case <-ctx.Done():
-					return false
+					return
 				}
 			}
 		}
-		return true
-	}
 
-	walkDir(config.Path)
+		// 并发处理子目录
+		var subWg sync.WaitGroup
+		for _, subDir := range subDirs {
+			subDirPath := filepath.Join(dir, subDir.Name())
+			subWg.Add(1)
+			go func(dirPath string) {
+				defer subWg.Done()
+				walkDirConcurrent(ctx, dirPath, config, ignorePatterns, taskChan, &subWg, semaphore)
+			}(subDirPath)
+		}
+		subWg.Wait()
+	}()
 }
 
 // isSymlink 检查是否为符号链接

@@ -379,11 +379,15 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter, cfg *config.Confi
 		}
 	}
 
+	// 创建进度条
+	progressBar := NewProgressBar(0, 30) // 初始未知总数，宽度30
+
 	// 创建带超时的 context（60秒超时）
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	startTime := time.Now()
+	lastStats := search.ScanStats{}
 
 	config := search.SearchConfig{
 		Keyword:      keyword,
@@ -393,13 +397,10 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter, cfg *config.Confi
 		ContextLines: contextLines,
 		Context:      ctx,
 		ProgressCallback: func(stats search.ScanStats) {
-			// 每 50 个文件更新一次进度
+			lastStats = stats
+			// 每 50 个文件更新一次进度条
 			if stats.FilesScanned%50 == 0 {
-				elapsed := time.Since(startTime)
-				speed := float64(stats.FilesScanned) / elapsed.Seconds()
-				writer.WriteString(fmt.Sprintf("\r📊 进度: 已扫描 %d 个文件，匹配 %d 个，速度 %.0f 文件/秒",
-					stats.FilesScanned, stats.FilesMatched, speed))
-				writer.Flush()
+				progressBar.Update(stats.FilesScanned, stats)
 			}
 		},
 	}
@@ -410,8 +411,8 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter, cfg *config.Confi
 	// 收集所有结果
 	results := search.Search(config)
 
-	// 清除最后的进度行
-	writer.WriteString("\r" + strings.Repeat(" ", 80) + "\r")
+	// 完成进度条
+	progressBar.Finish(lastStats)
 
 	elapsed := time.Since(startTime)
 	totalCount := len(results)

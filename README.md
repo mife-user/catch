@@ -15,49 +15,47 @@
 - 🌍 **跨平台支持** - Windows / macOS / Linux
 - 🚀 **一键配置** - 支持添加到系统环境变量
 
-## 📥 下载
+## 📥 安装
 
-### 方式 1: 克隆仓库
+### 方式 1: 下载预编译二进制文件（推荐）
 
-```bash
-git clone https://github.com/yourusername/catch.git
-cd catch
+从 [Releases](https://github.com/yourusername/catch/releases) 页面下载对应平台的可执行文件：
+
+#### Windows
+```powershell
+# 下载 catch-windows-amd64.exe
+# 重命名为 catch.exe 并添加到 PATH
+move catch-windows-amd64.exe catch.exe
+# 或者添加到 PATH
+setx PATH "%PATH%;C:\path\to\catch"
 ```
 
-### 方式 2: 下载源码
+#### macOS
+```bash
+# 下载并添加执行权限
+chmod +x catch-darwin-amd64
+sudo mv catch-darwin-amd64 /usr/local/bin/catch
+```
 
-从 [Releases](https://github.com/yourusername/catch/releases) 页面下载最新源码
+#### Linux
+```bash
+# 下载并添加执行权限
+chmod +x catch-linux-amd64
+sudo mv catch-linux-amd64 /usr/local/bin/catch
+```
 
-## 🔨 编译
-
-### 环境要求
-
-- Go 1.18 或更高版本
-
-### 编译步骤
+### 方式 2: 从源码编译
 
 ```bash
-# 进入项目目录
+# 克隆仓库
+git clone https://github.com/yourusername/catch.git
 cd catch
-
-# 下载依赖
-go mod tidy
 
 # 编译
 go build -o catch ./cmd/catch
-```
 
-### 跨平台编译
-
-```bash
-# Windows
-GOOS=windows GOARCH=amd64 go build -o catch.exe ./cmd/catch
-
-# macOS
-GOOS=darwin GOARCH=amd64 go build -o catch ./cmd/catch
-
-# Linux
-GOOS=linux GOARCH=amd64 go build -o catch ./cmd/catch
+# 移动到 PATH
+sudo mv catch /usr/local/bin/
 ```
 
 ## 🚀 运行
