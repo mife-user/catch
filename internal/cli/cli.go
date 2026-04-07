@@ -369,7 +369,7 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter, cfg *config.Confi
 	}
 
 	// 创建进度条
-	progressBar := NewProgressBar(0, 30) // 初始未知总数，宽度30
+	progressBar := NewProgressBar(writer, 0, 30) // 未知总数，使用旋转动画
 
 	// 创建带超时的 context（60秒超时）
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -387,15 +387,12 @@ func searchContent(reader *bufio.Reader, writer *SimpleWriter, cfg *config.Confi
 		Context:      ctx,
 		ProgressCallback: func(stats search.ScanStats) {
 			lastStats = stats
-			// 每 50 个文件更新一次进度条
-			if stats.FilesScanned%50 == 0 {
+			// 每 10 个文件更新一次进度条（更频繁）
+			if stats.FilesScanned%10 == 0 {
 				progressBar.Update(stats.FilesScanned, stats)
 			}
 		},
 	}
-
-	writer.WriteString("\n🔍 正在搜索...\n")
-	writer.Flush()
 
 	// 收集所有结果
 	results := search.Search(config)
