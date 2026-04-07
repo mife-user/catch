@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main, master, develop]
+    tags-ignore:
+      - 'v*'  # 忽略 tag 推送，避免与 release workflow 冲突
   pull_request:
     branches: [main, master]
 
