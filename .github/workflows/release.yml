@@ -35,47 +35,56 @@ jobs:
         run: |
           mkdir -p dist
           
-          # Windows
+          echo "Building for Windows amd64..."
           GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/catch-windows-amd64.exe ./cmd/catch
+          
+          echo "Building for Windows arm64..."
           GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -o dist/catch-windows-arm64.exe ./cmd/catch
           
-          # macOS
+          echo "Building for macOS amd64..."
           GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/catch-darwin-amd64 ./cmd/catch
+          
+          echo "Building for macOS arm64..."
           GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/catch-darwin-arm64 ./cmd/catch
           
-          # Linux
+          echo "Building for Linux amd64..."
           GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/catch-linux-amd64 ./cmd/catch
+          
+          echo "Building for Linux arm64..."
           GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o dist/catch-linux-arm64 ./cmd/catch
           
-          # 生成 checksum
+          echo "Generating checksums..."
           cd dist
           sha256sum * > checksums.txt
+          
+          echo "Build complete. Files:"
+          ls -lh dist/
 
       - name: 提取 Release Notes
         id: release_notes
         run: |
-          # 从 CHANGELOG.md 提取当前版本的更新日志
           VERSION=${GITHUB_REF_NAME#v}
-          NOTES=$(awk "/## \[v${VERSION}\]/{flag=1; next} /## \[/{flag=0} flag" CHANGELOG.md)
+          echo "Extracting notes for version: $VERSION"
           
-          # 如果提取失败，使用默认文本
-          if [ -z "$NOTES" ]; then
-            NOTES="Release ${GITHUB_REF_NAME}"
+          # 尝试从 CHANGELOG.md 提取
+          if grep -q "## \[v${VERSION}\]" CHANGELOG.md; then
+            # 提取版本之间的内容
+            sed -n "/## \[v${VERSION}\]/,/## \[/p" CHANGELOG.md | sed '$d' > RELEASE_NOTES.md
+            echo "Successfully extracted release notes"
+          else
+            echo "Release ${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+            echo "⚠️  Release notes not found in CHANGELOG.md, using default" >> RELEASE_NOTES.md
+            echo "Warning: Release notes not found, using default"
           fi
           
-          # 保存到文件
-          echo "$NOTES" > RELEASE_NOTES.md
-          
-          # 设置输出
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "Release notes content:"
+          cat RELEASE_NOTES.md
 
       - name: 创建 GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
           body_path: RELEASE_NOTES.md
           files: |
             dist/catch-windows-amd64.exe
@@ -87,5 +96,6 @@ jobs:
             dist/checksums.txt
           draft: false
           prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
