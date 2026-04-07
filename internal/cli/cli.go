@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -39,16 +38,6 @@ func (w *SimpleWriter) Flush() error {
 		return f.Sync()
 	}
 	return nil
-}
-
-// init 初始化 Windows 控制台编码
-func init() {
-	if runtime.GOOS == "windows" {
-		// 设置控制台输出代码页为 UTF-8 (65001)
-		kernel32 := syscall.NewLazyDLL("kernel32.dll")
-		setConsoleOutputCP := kernel32.NewProc("SetConsoleOutputCP")
-		setConsoleOutputCP.Call(65001)
-	}
 }
 
 // MenuItem 菜单项
