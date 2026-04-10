@@ -26,3 +26,18 @@ go.work
 # OS
 .DS_Store
 Thumbs.db
+
+# Node
+node_modules/
+web/node_modules/
+
+# Build output
+web/dist/
+
+# Config data
+.catch/
+.catch-trash/
+
+# Temp files
+*.tmp
+*.bak

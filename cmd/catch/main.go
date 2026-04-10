@@ -1,100 +1,121 @@
 package main
 
 import (
-	"catch/internal/cli"
-	"catch/internal/search"
-	"context"
+	"catch/internal/application/service"
+	domainService "catch/internal/domain/service"
+	"catch/internal/infrastructure/browser"
+	"catch/internal/infrastructure/persistence"
+	"catch/internal/interfaces/api"
 	"fmt"
+	"log"
+	"net/http"
 	"os"
-	"time"
+	"os/signal"
+	"syscall"
+
+	"github.com/gin-gonic/gin"
+)
+
+const (
+	Version   = "1.0.0"
+	PortStart = 3000
+	PortEnd   = 3100
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		// 无参数时进入交互模式
-		cli.RunInteractive()
-		return
+	printBanner()
+
+	configRepo := persistence.NewConfigRepository()
+	fileRepo := persistence.NewFileRepository()
+	trashRepo := persistence.NewTrashRepository()
+
+	configAppSvc := service.NewConfigAppService(configRepo)
+	if err := configAppSvc.EnsureConfig(); err != nil {
+		log.Printf("警告: 初始化配置文件失败: %v\n", err)
 	}
 
-	// 命令行模式
-	command := os.Args[1]
-	switch command {
-	case "search", "s":
-		runSearch(os.Args[2:])
-	case "add-path":
-		cli.AddToPath(&cli.SimpleWriter{Writer: os.Stdout})
-	case "help", "h":
-		printHelp()
-	default:
-		fmt.Printf("未知命令：%s\n", command)
-		printHelp()
-	}
-}
-
-func runSearch(args []string) {
-	if len(args) < 1 {
-		fmt.Println("用法：catch search <关键字> [选项]")
-		fmt.Println("选项:")
-		fmt.Println("  -r, --recursive    递归搜索子目录")
-		fmt.Println("  -t, --type         文件类型过滤 (如：.go,.txt)")
-		fmt.Println("  -p, --path         搜索路径 (默认为当前目录)")
-		return
+	trashDomainSvc := domainService.NewTrashDomainService(trashRepo, configRepo)
+	if err := trashDomainSvc.StartupCleanup(); err != nil {
+		log.Printf("警告: 启动时清理过期文件失败: %v\n", err)
 	}
 
-	keyword := args[0]
-	recursive := false
-	fileType := ""
-	searchPath := "."
+	fileDomainSvc := domainService.NewFileDomainService(fileRepo)
 
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-r", "--recursive":
-			recursive = true
-		case "-t", "--type":
-			if i+1 < len(args) {
-				i++
-				fileType = args[i]
-			}
-		case "-p", "--path":
-			if i+1 < len(args) {
-				i++
-				searchPath = args[i]
-			}
+	fileAppSvc := service.NewFileAppService(fileRepo, configRepo, trashRepo, fileDomainSvc, trashDomainSvc)
+	feedbackAppSvc := service.NewFeedbackAppService(configRepo)
+	trashAppSvc := service.NewTrashAppService(trashRepo, configRepo, trashDomainSvc)
+
+	port, err := browser.FindAvailablePort(PortStart, PortEnd)
+	if err != nil {
+		log.Fatalf("错误: %v\n", err)
+	}
+	fmt.Printf("检测到可用端口: %d\n", port)
+
+	gin.SetMode(gin.ReleaseMode)
+	engine := gin.Default()
+
+	engine.Use(corsMiddleware())
+
+	router := api.NewRouter(fileAppSvc, configAppSvc, feedbackAppSvc, trashAppSvc)
+	router.Setup(engine)
+
+	setupStaticFiles(engine)
+
+	addr := fmt.Sprintf(":%d", port)
+	url := fmt.Sprintf("http://localhost:%d", port)
+
+	fmt.Printf("服务已启动: %s\n", url)
+	fmt.Println("正在打开浏览器...")
+
+	if err := browser.Open(url); err != nil {
+		fmt.Printf("无法自动打开浏览器，请手动访问: %s\n", url)
+	}
+
+	fmt.Println("按 Ctrl+C 停止服务")
+
+	go func() {
+		if err := engine.Run(addr); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("服务启动失败: %v\n", err)
 		}
-	}
+	}()
 
-	// 创建带超时的 context（120秒超时）
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 
-	config := search.SearchConfig{
-		Keyword:      keyword,
-		Path:         searchPath,
-		Recursive:    recursive,
-		FileType:     fileType,
-		MaxGoroutine: 10,
-		Context:      ctx,
-	}
-
-	results := search.Search(config)
-	search.PrintResults(results, keyword)
+	fmt.Println("\n服务已停止")
 }
 
-func printHelp() {
-	fmt.Println("Catch - 本地文件夹内容搜索工具")
-	fmt.Println()
-	fmt.Println("用法:")
-	fmt.Println("  catch                    进入交互模式")
-	fmt.Println("  catch search <关键字>    搜索文件内容和文件名")
-	fmt.Println("  catch add-path           添加到系统环境变量")
-	fmt.Println("  catch help               显示帮助信息")
-	fmt.Println()
-	fmt.Println("搜索选项:")
-	fmt.Println("  -r, --recursive    递归搜索子目录")
-	fmt.Println("  -t, --type         文件类型过滤 (如：.go,.txt)")
-	fmt.Println("  -p, --path         搜索路径 (默认为当前目录)")
-	fmt.Println()
-	fmt.Println("示例:")
-	fmt.Println("  catch search hello -r")
-	fmt.Println("  catch search func -t .go -p ./src")
+func printBanner() {
+	fmt.Println("Catch 文件整理工具 v" + Version)
+	fmt.Println("===============================")
+	fmt.Println("正在启动服务...")
+}
+
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func setupStaticFiles(engine *gin.Engine) {
+	wd, _ := os.Getwd()
+	distPath := wd + "/web/dist"
+	if _, err := os.Stat(distPath); err == nil {
+		engine.Static("/assets", distPath+"/assets")
+		engine.StaticFile("/", distPath+"/index.html")
+		engine.StaticFile("/index.html", distPath+"/index.html")
+		engine.NoRoute(func(c *gin.Context) {
+			c.File(distPath + "/index.html")
+		})
+	}
 }

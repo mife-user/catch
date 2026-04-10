@@ -1,0 +1,25 @@
+{
+  "version": "1.0.0",
+  "server": {
+    "port": 3000
+  },
+  "trash": {
+    "expire_days": 7,
+    "path": "~/.catch-trash"
+  },
+  "security": {
+    "password": "",
+    "password_hint": ""
+  },
+  "smtp": {
+    "host": "",
+    "port": 465,
+    "username": "",
+    "password": "",
+    "to": "15723556393@163.com"
+  },
+  "favorites": [],
+  "search": {
+    "default_path": "~"
+  }
+}
