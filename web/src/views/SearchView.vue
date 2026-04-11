@@ -12,7 +12,7 @@
         <el-form-item label="搜索路径">
           <el-input v-model="searchForm.path" placeholder="输入搜索路径，如 C:\Users" clearable>
             <template #append>
-              <el-button @click="selectPath">浏览</el-button>
+              <el-button @click="showBrowseDialog = true">浏览</el-button>
             </template>
           </el-input>
         </el-form-item>
@@ -87,7 +87,7 @@
         </div>
       </template>
 
-      <el-table :data="results" @selection-change="handleSelectionChange" stripe>
+      <el-table ref="tableRef" :data="results" @selection-change="handleSelectionChange" stripe>
         <el-table-column type="selection" width="55" />
         <el-table-column prop="name" label="文件名" min-width="200" show-overflow-tooltip />
         <el-table-column prop="path" label="路径" min-width="300" show-overflow-tooltip />
@@ -104,13 +104,43 @@
         <el-alert :title="`已跳过 ${skipped.length} 个无权限文件`" type="warning" :closable="false" show-icon />
       </div>
     </el-card>
+
+    <el-dialog v-model="showBrowseDialog" title="选择目录" width="600px">
+      <div class="browse-dialog">
+        <div class="browse-path">
+          <el-input v-model="browsePath" placeholder="输入路径" @keyup.enter="loadBrowsePath">
+            <template #prepend>路径</template>
+            <template #append>
+              <el-button @click="loadBrowsePath">前往</el-button>
+            </template>
+          </el-input>
+        </div>
+        <div class="browse-list">
+          <div class="browse-item parent-item" @click="goToParent">
+            <el-icon><FolderOpened /></el-icon>
+            <span>.. (上级目录)</span>
+          </div>
+          <div v-for="item in browseItems" :key="item.path" class="browse-item" @click="selectBrowseItem(item)">
+            <el-icon><Folder /></el-icon>
+            <span>{{ item.name }}</span>
+          </div>
+          <div v-if="browseItems.length === 0" class="browse-empty">
+            该目录下没有子目录
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showBrowseDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmBrowse">选择当前目录</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
-import { Search } from '@element-plus/icons-vue'
-import { searchFiles, deleteFiles, moveFiles, copyFiles } from '../api/files'
+import { ref, reactive, nextTick } from 'vue'
+import { Search, Folder, FolderOpened } from '@element-plus/icons-vue'
+import { searchFiles, browsePath as fetchBrowsePath } from '../api/files'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 
@@ -120,6 +150,7 @@ const results = ref([])
 const skipped = ref([])
 const selectedFiles = ref([])
 const customExtsInput = ref('')
+const tableRef = ref(null)
 
 const searchForm = reactive({
   path: '',
@@ -131,7 +162,16 @@ const searchForm = reactive({
   mod_before: '',
 })
 
+const showBrowseDialog = ref(false)
+const browsePath = ref('')
+const browseItems = ref([])
+const browseCurrentPath = ref('')
+
 const handleSearch = async () => {
+  if (!searchForm.path) {
+    ElMessage.warning('请输入搜索路径')
+    return
+  }
   loading.value = true
   try {
     const params = { ...searchForm }
@@ -172,11 +212,17 @@ const handleSelectionChange = (selection) => {
 }
 
 const selectAll = () => {
-  // el-table handles this via checkbox
+  if (!tableRef.value) return
+  results.value.forEach(row => {
+    tableRef.value.toggleRowSelection(row, true)
+  })
 }
 
 const invertSelection = () => {
-  // This is handled by the table component
+  if (!tableRef.value) return
+  results.value.forEach(row => {
+    tableRef.value.toggleRowSelection(row, !selectedFiles.value.includes(row))
+  })
 }
 
 const handleBatchDelete = () => {
@@ -211,8 +257,30 @@ const handleBatchRename = () => {
   router.push({ path: '/rename', query: { files: selectedFiles.value.map(f => f.path) } })
 }
 
-const selectPath = () => {
-  ElMessage.info('请直接在输入框中输入路径')
+const loadBrowsePath = async () => {
+  try {
+    const data = await fetchBrowsePath(browsePath.value)
+    browseItems.value = data.items || []
+    browseCurrentPath.value = data.current_path || ''
+    browsePath.value = data.current_path || ''
+  } catch (err) {
+    ElMessage.error(err.message || '无法浏览该路径')
+  }
+}
+
+const goToParent = () => {
+  browsePath.value = ''
+  loadBrowsePath()
+}
+
+const selectBrowseItem = (item) => {
+  browsePath.value = item.path
+  loadBrowsePath()
+}
+
+const confirmBrowse = () => {
+  searchForm.path = browseCurrentPath.value
+  showBrowseDialog.value = false
 }
 
 const formatSize = (bytes) => {
@@ -254,5 +322,49 @@ const formatSize = (bytes) => {
 
 .skipped-info {
   margin-top: 16px;
+}
+
+.browse-dialog {
+  max-height: 400px;
+}
+
+.browse-path {
+  margin-bottom: 12px;
+}
+
+.browse-list {
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.browse-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.browse-item:hover {
+  background-color: #f5f7fa;
+}
+
+.browse-item .el-icon {
+  color: #e6a23c;
+  font-size: 18px;
+}
+
+.parent-item {
+  color: #909399;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.browse-empty {
+  padding: 24px;
+  text-align: center;
+  color: #909399;
 }
 </style>

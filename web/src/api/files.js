@@ -4,6 +4,10 @@ export function searchFiles(params) {
   return api.get('/files/search', { params })
 }
 
+export function browsePath(path) {
+  return api.get('/files/browse', { params: { path } })
+}
+
 export function deleteFiles(data) {
   return api.post('/files/delete', data)
 }

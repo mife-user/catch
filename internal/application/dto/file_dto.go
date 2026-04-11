@@ -22,16 +22,16 @@ type FileResult struct {
 }
 
 type SearchResponse struct {
-	Files       []FileResult `json:"files"`
-	Skipped     []string     `json:"skipped"`
-	Total       int          `json:"total"`
-	SkippedCount int         `json:"skipped_count"`
+	Files        []FileResult `json:"files"`
+	Skipped      []string     `json:"skipped"`
+	Total        int          `json:"total"`
+	SkippedCount int          `json:"skipped_count"`
 }
 
 type DeleteRequest struct {
-	Paths   []string `json:"paths"`
-	Mode    string   `json:"mode"`
-	Password string  `json:"password,omitempty"`
+	Paths    []string `json:"paths"`
+	Mode     string   `json:"mode"`
+	Password string   `json:"password,omitempty"`
 }
 
 type DeleteResponse struct {
@@ -78,4 +78,16 @@ type CopyResponse struct {
 	Success []string `json:"success"`
 	Failed  []string `json:"failed"`
 	Skipped []string `json:"skipped"`
+}
+
+type BrowseItem struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	IsDir bool   `json:"is_dir"`
+}
+
+type BrowseResponse struct {
+	CurrentPath string       `json:"current_path"`
+	ParentPath  string       `json:"parent_path"`
+	Items       []BrowseItem `json:"items"`
 }

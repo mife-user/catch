@@ -251,3 +251,54 @@ func (s *FileAppService) moveOrCopy(srcPaths []string, dstPath string, conflict 
 
 	return &dto.MoveResponse{Success: success, Failed: failed, Skipped: skipped}, nil
 }
+
+func (s *FileAppService) Browse(path string) (*dto.BrowseResponse, error) {
+	if path == "" || path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("无法获取用户主目录: %w", err)
+		}
+		path = home
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("无效路径: %w", err)
+	}
+
+	entries, err := os.ReadDir(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("无法读取目录: %w", err)
+	}
+
+	parentPath := filepath.Dir(absPath)
+	items := make([]dto.BrowseItem, 0)
+
+	for _, entry := range entries {
+		fullPath := filepath.Join(absPath, entry.Name())
+		_, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		if !entry.IsDir() {
+			continue
+		}
+
+		if len(entry.Name()) > 0 && entry.Name()[0] == '.' {
+			continue
+		}
+
+		items = append(items, dto.BrowseItem{
+			Name:  entry.Name(),
+			Path:  fullPath,
+			IsDir: true,
+		})
+	}
+
+	return &dto.BrowseResponse{
+		CurrentPath: absPath,
+		ParentPath:  parentPath,
+		Items:       items,
+	}, nil
+}

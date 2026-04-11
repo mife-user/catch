@@ -21,7 +21,7 @@
         <el-form-item label="目标路径">
           <el-input v-model="moveForm.dst_path" placeholder="输入目标目录路径" clearable>
             <template #append>
-              <el-button @click="selectDstPath">浏览</el-button>
+              <el-button @click="showBrowseDialog = true">浏览</el-button>
             </template>
           </el-input>
         </el-form-item>
@@ -30,6 +30,9 @@
           <el-select v-model="selectedFavorite" placeholder="从收藏中选择" clearable @change="handleFavoriteSelect">
             <el-option v-for="fav in favorites" :key="fav" :label="fav" :value="fav" />
           </el-select>
+          <el-button v-if="favorites.length === 0" type="primary" link @click="router.push('/settings/basic')">
+            添加收藏目录
+          </el-button>
         </el-form-item>
 
         <el-form-item label="冲突处理">
@@ -63,18 +66,49 @@
         <p class="skip-text">跳过: {{ result.skipped.length }} 个</p>
       </div>
     </el-card>
+
+    <el-dialog v-model="showBrowseDialog" title="选择目标目录" width="600px">
+      <div class="browse-dialog">
+        <div class="browse-path">
+          <el-input v-model="browsePathInput" placeholder="输入路径" @keyup.enter="loadBrowsePath">
+            <template #prepend>路径</template>
+            <template #append>
+              <el-button @click="loadBrowsePath">前往</el-button>
+            </template>
+          </el-input>
+        </div>
+        <div class="browse-list">
+          <div class="browse-item parent-item" @click="goToParent">
+            <el-icon><FolderOpened /></el-icon>
+            <span>.. (上级目录)</span>
+          </div>
+          <div v-for="item in browseItems" :key="item.path" class="browse-item" @click="selectBrowseItem(item)">
+            <el-icon><Folder /></el-icon>
+            <span>{{ item.name }}</span>
+          </div>
+          <div v-if="browseItems.length === 0" class="browse-empty">
+            该目录下没有子目录
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showBrowseDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmBrowse">选择当前目录</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Rank } from '@element-plus/icons-vue'
-import { moveFiles, copyFiles } from '../api/files'
+import { Rank, Folder, FolderOpened } from '@element-plus/icons-vue'
+import { moveFiles, copyFiles, browsePath as fetchBrowsePath } from '../api/files'
 import { getConfig } from '../api/config'
 import { ElMessage } from 'element-plus'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
+const router = useRouter()
 const loading = ref(false)
 const result = ref(null)
 const filesInput = ref('')
@@ -87,6 +121,11 @@ const moveForm = reactive({
   dst_path: '',
   conflict: 'skip',
 })
+
+const showBrowseDialog = ref(false)
+const browsePathInput = ref('')
+const browseItems = ref([])
+const browseCurrentPath = ref('')
 
 onMounted(async () => {
   if (route.query.files) {
@@ -106,8 +145,30 @@ const handleFavoriteSelect = (val) => {
   }
 }
 
-const selectDstPath = () => {
-  ElMessage.info('请直接在输入框中输入目标路径')
+const loadBrowsePath = async () => {
+  try {
+    const data = await fetchBrowsePath(browsePathInput.value)
+    browseItems.value = data.items || []
+    browseCurrentPath.value = data.current_path || ''
+    browsePathInput.value = data.current_path || ''
+  } catch (err) {
+    ElMessage.error(err.message || '无法浏览该路径')
+  }
+}
+
+const goToParent = () => {
+  browsePathInput.value = ''
+  loadBrowsePath()
+}
+
+const selectBrowseItem = (item) => {
+  browsePathInput.value = item.path
+  loadBrowsePath()
+}
+
+const confirmBrowse = () => {
+  moveForm.dst_path = browseCurrentPath.value
+  showBrowseDialog.value = false
 }
 
 const handleExecute = async () => {
@@ -168,4 +229,48 @@ const handleExecute = async () => {
 .fail-text { color: #f5222d; }
 .skip-text { color: #faad14; }
 .fail-item { color: #f5222d; font-size: 13px; margin: 2px 0; }
+
+.browse-dialog {
+  max-height: 400px;
+}
+
+.browse-path {
+  margin-bottom: 12px;
+}
+
+.browse-list {
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.browse-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.browse-item:hover {
+  background-color: #f5f7fa;
+}
+
+.browse-item .el-icon {
+  color: #e6a23c;
+  font-size: 18px;
+}
+
+.parent-item {
+  color: #909399;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.browse-empty {
+  padding: 24px;
+  text-align: center;
+  color: #909399;
+}
 </style>

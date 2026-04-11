@@ -28,6 +28,9 @@ func (t *TrashItem) IsExpired() bool {
 }
 
 func (t *TrashItem) CanRestore() bool {
+	if t.IsExpired() {
+		return false
+	}
 	return true
 }
 

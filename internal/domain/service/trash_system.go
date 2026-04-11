@@ -4,13 +4,16 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 func moveToSystemTrash(filePath string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.Command("powershell", "-Command", "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('"+filePath+"', 'OnlyErrorDialogs', 'SendToRecycleBin')")
+		escaped := strings.ReplaceAll(filePath, "'", "''")
+		cmd = exec.Command("powershell", "-Command",
+			"Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('"+escaped+"', 'OnlyErrorDialogs', 'SendToRecycleBin')")
 	case "darwin":
 		cmd = exec.Command("mv", filePath, os.Getenv("HOME")+"/.Trash/")
 	case "linux":

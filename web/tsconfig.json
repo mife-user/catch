@@ -13,11 +13,14 @@
     "moduleDetection": "force",
     "noEmit": true,
 
+    /* JavaScript support */
+    "allowJs": true,
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src/**/*.js", "src/**/*.vue"]
 }

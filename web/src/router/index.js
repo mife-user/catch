@@ -26,6 +26,11 @@ const routes = [
     component: () => import('../views/MoveView.vue'),
   },
   {
+    path: '/trash',
+    name: 'Trash',
+    component: () => import('../views/TrashView.vue'),
+  },
+  {
     path: '/settings/basic',
     name: 'SettingsBasic',
     component: () => import('../views/settings/BasicView.vue'),

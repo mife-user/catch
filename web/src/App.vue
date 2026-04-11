@@ -29,6 +29,10 @@
           <el-icon><Rank /></el-icon>
           <span>文件移动</span>
         </el-menu-item>
+        <el-menu-item index="/trash">
+          <el-icon><Delete /></el-icon>
+          <span>回收站</span>
+        </el-menu-item>
 
         <el-sub-menu index="settings">
           <template #title>

@@ -16,6 +16,9 @@
             :rows="4"
             placeholder="输入要重命名的文件路径，每行一个"
           />
+          <div v-if="fileList.length > 0" class="file-count">
+            共 {{ fileList.length }} 个文件
+          </div>
         </el-form-item>
 
         <el-form-item label="重命名规则">
@@ -55,6 +58,15 @@
           </el-row>
         </el-form-item>
 
+        <el-alert
+          v-if="renameForm.rule === 'timestamp'"
+          title="将在文件名后添加当前日期，格式：_YYYYMMDD"
+          type="info"
+          :closable="false"
+          show-icon
+          class="rule-hint"
+        />
+
         <el-form-item>
           <el-button type="primary" @click="handlePreview" :loading="previewLoading">
             预览结果
@@ -68,19 +80,59 @@
 
     <el-card v-if="previewResult" class="preview-card">
       <template #header>
-        <span>预览结果</span>
+        <div class="card-header">
+          <span>预览结果 ({{ previewResult.previews?.length || 0 }} 个文件)</span>
+          <el-tag type="info" size="small">请确认后执行</el-tag>
+        </div>
       </template>
       <el-table :data="previewResult.previews" stripe>
-        <el-table-column prop="old_path" label="原路径" min-width="300" show-overflow-tooltip />
-        <el-table-column prop="new_path" label="新路径" min-width="300" show-overflow-tooltip />
+        <el-table-column label="原文件名" min-width="300">
+          <template #default="{ row }">
+            <span class="old-name">{{ getFileName(row.old_path) }}</span>
+            <div class="path-hint">{{ row.old_path }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="" width="60" align="center">
+          <template #default>
+            <el-icon><Right /></el-icon>
+          </template>
+        </el-table-column>
+        <el-table-column label="新文件名" min-width="300">
+          <template #default="{ row }">
+            <span class="new-name">{{ getFileName(row.new_path) }}</span>
+            <div class="path-hint">{{ row.new_path }}</div>
+          </template>
+        </el-table-column>
       </el-table>
+    </el-card>
+
+    <el-card v-if="renameResult" class="result-card">
+      <template #header>
+        <span>执行结果</span>
+      </template>
+      <el-result
+        v-if="renameResult.failed.length === 0"
+        icon="success"
+        :title="`成功重命名 ${renameResult.success.length} 个文件`"
+      />
+      <el-result
+        v-else
+        icon="warning"
+        :title="`成功 ${renameResult.success.length} 个，失败 ${renameResult.failed.length} 个`"
+      >
+        <template #extra>
+          <div class="failed-list">
+            <p v-for="item in renameResult.failed" :key="item" class="failed-item">{{ item }}</p>
+          </div>
+        </template>
+      </el-result>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { Edit } from '@element-plus/icons-vue'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { Edit, Right } from '@element-plus/icons-vue'
 import { renamePreview, renameFiles } from '../api/files'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
@@ -89,6 +141,7 @@ const route = useRoute()
 const previewLoading = ref(false)
 const renameLoading = ref(false)
 const previewResult = ref(null)
+const renameResult = ref(null)
 const filesInput = ref('')
 
 const renameForm = reactive({
@@ -103,6 +156,10 @@ const renameForm = reactive({
   },
 })
 
+const fileList = computed(() => {
+  return filesInput.value.split('\n').map(p => p.trim()).filter(p => p)
+})
+
 onMounted(() => {
   if (route.query.files) {
     const files = Array.isArray(route.query.files) ? route.query.files : [route.query.files]
@@ -112,6 +169,12 @@ onMounted(() => {
 
 const getPaths = () => {
   return filesInput.value.split('\n').map(p => p.trim()).filter(p => p)
+}
+
+const getFileName = (path) => {
+  const parts = path.replace(/\\/g, '/')
+  const idx = parts.lastIndexOf('/')
+  return idx >= 0 ? parts.substring(idx + 1) : path
 }
 
 const handlePreview = async () => {
@@ -129,6 +192,7 @@ const handlePreview = async () => {
       params: renameForm.params,
     })
     previewResult.value = data
+    renameResult.value = null
     ElMessage.success('预览生成成功')
   } catch (err) {
     ElMessage.error(err.message || '预览失败')
@@ -151,6 +215,7 @@ const handleRename = async () => {
       rule: renameForm.rule,
       params: renameForm.params,
     })
+    renameResult.value = data
     ElMessage.success(`重命名完成：成功 ${data.success?.length || 0} 个`)
     previewResult.value = null
   } catch (err) {
@@ -174,7 +239,58 @@ const handleRename = async () => {
   font-weight: 600;
 }
 
+.preview-card .card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.file-count {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.rule-hint {
+  margin-bottom: 16px;
+}
+
+.old-name {
+  color: #909399;
+  text-decoration: line-through;
+}
+
+.new-name {
+  color: #1890ff;
+  font-weight: 500;
+}
+
+.path-hint {
+  font-size: 11px;
+  color: #c0c4cc;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .preview-card {
   margin-top: 20px;
+}
+
+.result-card {
+  margin-top: 20px;
+}
+
+.failed-list {
+  text-align: left;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.failed-item {
+  color: #f5222d;
+  font-size: 13px;
+  margin: 4px 0;
 }
 </style>

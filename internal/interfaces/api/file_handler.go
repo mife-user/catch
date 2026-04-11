@@ -20,6 +20,7 @@ func (h *FileHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	files := rg.Group("/files")
 	{
 		files.GET("/search", h.Search)
+		files.GET("/browse", h.Browse)
 		files.POST("/delete", h.Delete)
 		files.POST("/rename", h.Rename)
 		files.POST("/rename/preview", h.RenamePreview)
@@ -47,6 +48,16 @@ func (h *FileHandler) Search(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *FileHandler) Browse(c *gin.Context) {
+	path := c.Query("path")
+	resp, err := h.fileAppSvc.Browse(path)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, resp)
 }
 
