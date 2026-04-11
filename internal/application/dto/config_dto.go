@@ -2,6 +2,7 @@ package dto
 
 type ConfigResponse struct {
 	Version     string        `json:"version"`
+	FirstLaunch bool          `json:"first_launch"`
 	Server      ServerDTO     `json:"server"`
 	Trash       TrashDTO      `json:"trash"`
 	Security    SecurityDTO   `json:"security"`
@@ -10,6 +11,13 @@ type ConfigResponse struct {
 	Search      SearchDTO     `json:"search"`
 	HasPassword bool          `json:"has_password"`
 	HasSMTP     bool          `json:"has_smtp"`
+	SystemInfo  SystemInfoDTO `json:"system_info"`
+}
+
+type SystemInfoDTO struct {
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+	GoVersion string `json:"go_version"`
 }
 
 type ServerDTO struct {
@@ -41,18 +49,23 @@ type SearchDTO struct {
 }
 
 type UpdateConfigRequest struct {
-	Server    *ServerDTO    `json:"server,omitempty"`
-	Trash     *TrashDTO     `json:"trash,omitempty"`
-	Security  *SecurityDTO  `json:"security,omitempty"`
-	SMTP      *SMTPDTO      `json:"smtp,omitempty"`
-	Favorites []string      `json:"favorites,omitempty"`
-	Search    *SearchDTO    `json:"search,omitempty"`
+	FirstLaunch *bool        `json:"first_launch,omitempty"`
+	Server      *ServerDTO   `json:"server,omitempty"`
+	Trash       *TrashDTO    `json:"trash,omitempty"`
+	Security    *SecurityDTO `json:"security,omitempty"`
+	SMTP        *SMTPDTO     `json:"smtp,omitempty"`
+	Favorites   []string     `json:"favorites,omitempty"`
+	Search      *SearchDTO   `json:"search,omitempty"`
 }
 
 type SetPasswordRequest struct {
-	OldPassword string `json:"old_password,omitempty"`
-	NewPassword string `json:"new_password"`
+	OldPassword  string `json:"old_password,omitempty"`
+	NewPassword  string `json:"new_password"`
 	PasswordHint string `json:"password_hint,omitempty"`
+}
+
+type RemovePasswordRequest struct {
+	OldPassword string `json:"old_password"`
 }
 
 type VerifyPasswordRequest struct {

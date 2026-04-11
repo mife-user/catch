@@ -4,6 +4,7 @@ import (
 	"catch/internal/domain/entity"
 	"catch/internal/domain/repository"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -100,7 +101,23 @@ func (r *FileRepositoryImpl) Move(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	return os.Rename(src, dst)
+
+	err := os.Rename(src, dst)
+	if err == nil {
+		return nil
+	}
+
+	if linkErr, ok := err.(*os.LinkError); ok {
+		if r.Copy(src, dst) != nil {
+			return linkErr
+		}
+		if removeErr := os.Remove(src); removeErr != nil {
+			return removeErr
+		}
+		return nil
+	}
+
+	return err
 }
 
 func (r *FileRepositoryImpl) Copy(src, dst string) error {
@@ -120,17 +137,14 @@ func (r *FileRepositoryImpl) Copy(src, dst string) error {
 	}
 	defer dstFile.Close()
 
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := srcFile.Read(buf)
-		if n > 0 {
-			if _, err := dstFile.Write(buf[:n]); err != nil {
-				return err
-			}
-		}
-		if err != nil {
-			break
-		}
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		os.Remove(dst)
+		return err
+	}
+
+	srcInfo, err := os.Stat(src)
+	if err == nil {
+		os.Chmod(dst, srcInfo.Mode())
 	}
 
 	return nil

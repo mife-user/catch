@@ -6,6 +6,11 @@ const routes = [
     redirect: '/search',
   },
   {
+    path: '/welcome',
+    name: 'Welcome',
+    component: () => import('../views/WelcomeView.vue'),
+  },
+  {
     path: '/search',
     name: 'Search',
     component: () => import('../views/SearchView.vue'),

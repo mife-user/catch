@@ -5,6 +5,7 @@ import (
 	"catch/internal/domain/entity"
 	"catch/internal/domain/repository"
 	"fmt"
+	"runtime"
 )
 
 type ConfigAppService struct {
@@ -30,6 +31,9 @@ func (s *ConfigAppService) UpdateConfig(req dto.UpdateConfigRequest) (*dto.Confi
 		return nil, fmt.Errorf("无法加载配置: %w", err)
 	}
 
+	if req.FirstLaunch != nil {
+		config.FirstLaunch = *req.FirstLaunch
+	}
 	if req.Server != nil {
 		config.Server.Port = req.Server.Port
 	}
@@ -87,6 +91,25 @@ func (s *ConfigAppService) VerifyPassword(req dto.VerifyPasswordRequest) bool {
 	return config.ValidatePassword(req.Password)
 }
 
+func (s *ConfigAppService) RemovePassword(req dto.RemovePasswordRequest) error {
+	config, err := s.configRepo.Load()
+	if err != nil {
+		return fmt.Errorf("无法加载配置: %w", err)
+	}
+
+	if !config.HasPassword() {
+		return fmt.Errorf("未设置密码")
+	}
+
+	if config.Security.Password != req.OldPassword {
+		return fmt.Errorf("密码验证失败")
+	}
+
+	config.Security.Password = ""
+	config.Security.PasswordHint = ""
+	return s.configRepo.Save(config)
+}
+
 func (s *ConfigAppService) EnsureConfig() error {
 	if !s.configRepo.Exists() {
 		defaultConfig := entity.DefaultAppConfig()
@@ -97,7 +120,8 @@ func (s *ConfigAppService) EnsureConfig() error {
 
 func (s *ConfigAppService) toConfigResponse(config *entity.AppConfig) *dto.ConfigResponse {
 	return &dto.ConfigResponse{
-		Version: config.Version,
+		Version:     config.Version,
+		FirstLaunch: config.FirstLaunch,
 		Server: dto.ServerDTO{
 			Port: config.Server.Port,
 		},
@@ -122,5 +146,10 @@ func (s *ConfigAppService) toConfigResponse(config *entity.AppConfig) *dto.Confi
 		},
 		HasPassword: config.HasPassword(),
 		HasSMTP:     config.HasSMTP(),
+		SystemInfo: dto.SystemInfoDTO{
+			OS:        runtime.GOOS,
+			Arch:      runtime.GOARCH,
+			GoVersion: runtime.Version(),
+		},
 	}
 }

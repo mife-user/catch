@@ -10,11 +10,16 @@
 
       <el-form :model="searchForm" label-width="100px" label-position="left">
         <el-form-item label="搜索路径">
-          <el-input v-model="searchForm.path" placeholder="输入搜索路径，如 C:\Users" clearable>
-            <template #append>
-              <el-button @click="showBrowseDialog = true">浏览</el-button>
-            </template>
-          </el-input>
+          <div class="path-row">
+            <el-input v-model="searchForm.path" placeholder="输入搜索路径，如 C:\Users" clearable>
+              <template #append>
+                <el-button @click="showBrowseDialog = true">浏览</el-button>
+              </template>
+            </el-input>
+            <el-select v-if="favorites.length > 0" v-model="selectedFavorite" placeholder="收藏目录" clearable @change="handleFavoriteSelect" class="favorite-select">
+              <el-option v-for="fav in favorites" :key="fav" :label="fav" :value="fav" />
+            </el-select>
+          </div>
         </el-form-item>
 
         <el-form-item label="文件名">
@@ -138,9 +143,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick } from 'vue'
+import { ref, reactive, nextTick, onMounted } from 'vue'
 import { Search, Folder, FolderOpened } from '@element-plus/icons-vue'
 import { searchFiles, browsePath as fetchBrowsePath } from '../api/files'
+import { getConfig } from '../api/config'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 
@@ -151,6 +157,8 @@ const skipped = ref([])
 const selectedFiles = ref([])
 const customExtsInput = ref('')
 const tableRef = ref(null)
+const favorites = ref([])
+const selectedFavorite = ref('')
 
 const searchForm = reactive({
   path: '',
@@ -166,6 +174,25 @@ const showBrowseDialog = ref(false)
 const browsePath = ref('')
 const browseItems = ref([])
 const browseCurrentPath = ref('')
+const browseParentPath = ref('')
+
+onMounted(async () => {
+  try {
+    const config = await getConfig()
+    if (config.search?.default_path) {
+      searchForm.path = config.search.default_path
+    }
+    if (config.favorites && config.favorites.length > 0) {
+      favorites.value = config.favorites
+    }
+  } catch {}
+})
+
+const handleFavoriteSelect = (val) => {
+  if (val) {
+    searchForm.path = val
+  }
+}
 
 const handleSearch = async () => {
   if (!searchForm.path) {
@@ -230,7 +257,8 @@ const handleBatchDelete = () => {
     ElMessage.warning('请先选择文件')
     return
   }
-  router.push({ path: '/delete', query: { files: selectedFiles.value.map(f => f.path) } })
+  sessionStorage.setItem('catch_selected_files', JSON.stringify(selectedFiles.value.map(f => f.path)))
+  router.push('/delete')
 }
 
 const handleBatchMove = () => {
@@ -238,7 +266,8 @@ const handleBatchMove = () => {
     ElMessage.warning('请先选择文件')
     return
   }
-  router.push({ path: '/move', query: { files: selectedFiles.value.map(f => f.path), mode: 'move' } })
+  sessionStorage.setItem('catch_selected_files', JSON.stringify(selectedFiles.value.map(f => f.path)))
+  router.push({ path: '/move', query: { mode: 'move' } })
 }
 
 const handleBatchCopy = () => {
@@ -246,7 +275,8 @@ const handleBatchCopy = () => {
     ElMessage.warning('请先选择文件')
     return
   }
-  router.push({ path: '/move', query: { files: selectedFiles.value.map(f => f.path), mode: 'copy' } })
+  sessionStorage.setItem('catch_selected_files', JSON.stringify(selectedFiles.value.map(f => f.path)))
+  router.push({ path: '/move', query: { mode: 'copy' } })
 }
 
 const handleBatchRename = () => {
@@ -254,7 +284,8 @@ const handleBatchRename = () => {
     ElMessage.warning('请先选择文件')
     return
   }
-  router.push({ path: '/rename', query: { files: selectedFiles.value.map(f => f.path) } })
+  sessionStorage.setItem('catch_selected_files', JSON.stringify(selectedFiles.value.map(f => f.path)))
+  router.push('/rename')
 }
 
 const loadBrowsePath = async () => {
@@ -262,6 +293,7 @@ const loadBrowsePath = async () => {
     const data = await fetchBrowsePath(browsePath.value)
     browseItems.value = data.items || []
     browseCurrentPath.value = data.current_path || ''
+    browseParentPath.value = data.parent_path || ''
     browsePath.value = data.current_path || ''
   } catch (err) {
     ElMessage.error(err.message || '无法浏览该路径')
@@ -269,8 +301,10 @@ const loadBrowsePath = async () => {
 }
 
 const goToParent = () => {
-  browsePath.value = ''
-  loadBrowsePath()
+  if (browseCurrentPath.value) {
+    browsePath.value = browseParentPath.value
+    loadBrowsePath()
+  }
 }
 
 const selectBrowseItem = (item) => {
@@ -295,6 +329,20 @@ const formatSize = (bytes) => {
 <style scoped>
 .search-view {
   max-width: 1200px;
+}
+
+.path-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.path-row .el-input {
+  flex: 1;
+}
+
+.favorite-select {
+  width: 200px;
 }
 
 .search-card {

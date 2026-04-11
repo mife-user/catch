@@ -1,6 +1,6 @@
 <template>
   <div class="app-container">
-    <div class="sidebar">
+    <div v-if="!isWelcome" class="sidebar">
       <div class="sidebar-header">
         <h2>Catch</h2>
         <span class="version">v1.0.0</span>
@@ -29,6 +29,10 @@
           <el-icon><Rank /></el-icon>
           <span>文件移动</span>
         </el-menu-item>
+        <el-menu-item index="/copy">
+          <el-icon><CopyDocument /></el-icon>
+          <span>文件复制</span>
+        </el-menu-item>
         <el-menu-item index="/trash">
           <el-icon><Delete /></el-icon>
           <span>回收站</span>
@@ -47,25 +51,46 @@
       </el-menu>
     </div>
 
-    <div class="main-content">
+    <div class="main-content" :class="{ 'full-width': isWelcome }">
       <router-view />
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Search, Delete, Edit, Rank, Setting } from '@element-plus/icons-vue'
+import { Search, Delete, Edit, Rank, CopyDocument, Setting } from '@element-plus/icons-vue'
+import { getConfig } from './api/config'
 
 const router = useRouter()
 const route = useRoute()
 
-const activeMenu = computed(() => route.path)
+const isWelcome = computed(() => route.path === '/welcome')
+
+const activeMenu = computed(() => {
+  if (route.path === '/move' && route.query.mode === 'copy') {
+    return '/copy'
+  }
+  return route.path
+})
 
 const handleMenuSelect = (index) => {
-  router.push(index)
+  if (index === '/copy') {
+    router.push({ path: '/move', query: { mode: 'copy' } })
+  } else {
+    router.push(index)
+  }
 }
+
+onMounted(async () => {
+  try {
+    const config = await getConfig()
+    if (config.first_launch) {
+      router.replace('/welcome')
+    }
+  } catch {}
+})
 </script>
 
 <style>
@@ -133,5 +158,9 @@ html, body, #app {
   background-color: #f0f2f5;
   overflow-y: auto;
   padding: 24px;
+}
+
+.main-content.full-width {
+  padding: 0;
 }
 </style>

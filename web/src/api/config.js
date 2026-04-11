@@ -15,3 +15,7 @@ export function setPassword(data) {
 export function verifyPassword(data) {
   return api.post('/config/password/verify', data)
 }
+
+export function removePassword(data) {
+  return api.delete('/config/password', { data })
+}

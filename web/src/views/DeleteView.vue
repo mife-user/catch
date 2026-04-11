@@ -136,9 +136,15 @@ const fileList = computed(() => {
 })
 
 onMounted(async () => {
-  if (route.query.files) {
-    const files = Array.isArray(route.query.files) ? route.query.files : [route.query.files]
-    filesInput.value = files.join('\n')
+  const stored = sessionStorage.getItem('catch_selected_files')
+  if (stored) {
+    try {
+      const files = JSON.parse(stored)
+      if (Array.isArray(files) && files.length > 0) {
+        filesInput.value = files.join('\n')
+      }
+    } catch {}
+    sessionStorage.removeItem('catch_selected_files')
   }
 
   try {

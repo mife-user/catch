@@ -5,6 +5,12 @@
         <div class="card-header">
           <el-icon><Rank /></el-icon>
           <span>{{ isCopy ? '文件复制' : '文件移动' }}</span>
+          <el-switch
+            v-model="isCopy"
+            active-text="复制"
+            inactive-text="移动"
+            class="mode-switch"
+          />
         </div>
       </template>
 
@@ -16,6 +22,9 @@
             :rows="4"
             placeholder="输入要移动/复制的文件路径，每行一个"
           />
+          <div v-if="fileList.length > 0" class="file-count">
+            共 {{ fileList.length }} 个文件
+          </div>
         </el-form-item>
 
         <el-form-item label="目标路径">
@@ -43,6 +52,23 @@
           </el-radio-group>
         </el-form-item>
 
+        <el-alert
+          v-if="!isCopy"
+          title="移动操作会将文件从原位置转移到目标位置，原位置文件将不存在"
+          type="info"
+          :closable="false"
+          show-icon
+          class="mode-alert"
+        />
+        <el-alert
+          v-if="isCopy"
+          title="复制操作会在目标位置创建文件副本，原位置文件保持不变"
+          type="success"
+          :closable="false"
+          show-icon
+          class="mode-alert"
+        />
+
         <el-form-item>
           <el-button type="primary" @click="handleExecute" :loading="loading">
             {{ isCopy ? '执行复制' : '执行移动' }}
@@ -55,16 +81,34 @@
       <template #header>
         <span>{{ isCopy ? '复制' : '移动' }}结果</span>
       </template>
-      <div v-if="result.success?.length > 0">
-        <p class="success-text">成功: {{ result.success.length }} 个文件</p>
-      </div>
-      <div v-if="result.failed?.length > 0">
-        <p class="fail-text">失败: {{ result.failed.length }} 个</p>
-        <p v-for="item in result.failed" :key="item" class="fail-item">{{ item }}</p>
-      </div>
-      <div v-if="result.skipped?.length > 0">
-        <p class="skip-text">跳过: {{ result.skipped.length }} 个</p>
-      </div>
+      <el-result
+        v-if="result.failed?.length === 0 && result.skipped?.length === 0"
+        icon="success"
+        :title="`成功${isCopy ? '复制' : '移动'} ${result.success?.length || 0} 个文件`"
+      />
+      <el-result
+        v-else
+        icon="warning"
+        :title="`${isCopy ? '复制' : '移动'}完成`"
+      >
+        <template #extra>
+          <div class="result-stats">
+            <el-tag v-if="result.success?.length > 0" type="success" size="large">
+              成功: {{ result.success.length }}
+            </el-tag>
+            <el-tag v-if="result.failed?.length > 0" type="danger" size="large">
+              失败: {{ result.failed.length }}
+            </el-tag>
+            <el-tag v-if="result.skipped?.length > 0" type="warning" size="large">
+              跳过: {{ result.skipped.length }}
+            </el-tag>
+          </div>
+          <div v-if="result.failed?.length > 0" class="failed-list">
+            <p class="failed-title">失败详情：</p>
+            <p v-for="item in result.failed" :key="item" class="failed-item">{{ item }}</p>
+          </div>
+        </template>
+      </el-result>
     </el-card>
 
     <el-dialog v-model="showBrowseDialog" title="选择目标目录" width="600px">
@@ -104,7 +148,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { Rank, Folder, FolderOpened } from '@element-plus/icons-vue'
 import { moveFiles, copyFiles, browsePath as fetchBrowsePath } from '../api/files'
 import { getConfig } from '../api/config'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -115,7 +159,11 @@ const filesInput = ref('')
 const favorites = ref([])
 const selectedFavorite = ref('')
 
-const isCopy = computed(() => route.query.mode === 'copy')
+const isCopy = ref(route.query.mode === 'copy')
+
+const fileList = computed(() => {
+  return filesInput.value.split('\n').map(p => p.trim()).filter(p => p)
+})
 
 const moveForm = reactive({
   dst_path: '',
@@ -126,11 +174,18 @@ const showBrowseDialog = ref(false)
 const browsePathInput = ref('')
 const browseItems = ref([])
 const browseCurrentPath = ref('')
+const browseParentPath = ref('')
 
 onMounted(async () => {
-  if (route.query.files) {
-    const files = Array.isArray(route.query.files) ? route.query.files : [route.query.files]
-    filesInput.value = files.join('\n')
+  const stored = sessionStorage.getItem('catch_selected_files')
+  if (stored) {
+    try {
+      const files = JSON.parse(stored)
+      if (Array.isArray(files) && files.length > 0) {
+        filesInput.value = files.join('\n')
+      }
+    } catch {}
+    sessionStorage.removeItem('catch_selected_files')
   }
 
   try {
@@ -150,6 +205,7 @@ const loadBrowsePath = async () => {
     const data = await fetchBrowsePath(browsePathInput.value)
     browseItems.value = data.items || []
     browseCurrentPath.value = data.current_path || ''
+    browseParentPath.value = data.parent_path || ''
     browsePathInput.value = data.current_path || ''
   } catch (err) {
     ElMessage.error(err.message || '无法浏览该路径')
@@ -157,8 +213,10 @@ const loadBrowsePath = async () => {
 }
 
 const goToParent = () => {
-  browsePathInput.value = ''
-  loadBrowsePath()
+  if (browseCurrentPath.value) {
+    browsePathInput.value = browseParentPath.value
+    loadBrowsePath()
+  }
 }
 
 const selectBrowseItem = (item) => {
@@ -172,7 +230,7 @@ const confirmBrowse = () => {
 }
 
 const handleExecute = async () => {
-  const paths = filesInput.value.split('\n').map(p => p.trim()).filter(p => p)
+  const paths = fileList.value
   if (paths.length === 0) {
     ElMessage.warning('请输入文件路径')
     return
@@ -182,7 +240,23 @@ const handleExecute = async () => {
     return
   }
 
+  const opText = isCopy.value ? '复制' : '移动'
+  const conflictText = moveForm.conflict === 'skip' ? '跳过'
+    : moveForm.conflict === 'rename' ? '自动重命名'
+    : '覆盖'
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要将 ${paths.length} 个文件${opText}到 "${moveForm.dst_path}" 吗？冲突处理：${conflictText}`,
+      `确认${opText}`,
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+
   loading.value = true
+  result.value = null
   try {
     let data
     if (isCopy.value) {
@@ -199,7 +273,7 @@ const handleExecute = async () => {
       })
     }
     result.value = data
-    ElMessage.success(`${isCopy.value ? '复制' : '移动'}完成`)
+    ElMessage.success(`${opText}完成`)
   } catch (err) {
     ElMessage.error(err.message || '操作失败')
   } finally {
@@ -221,14 +295,48 @@ const handleExecute = async () => {
   font-weight: 600;
 }
 
+.mode-switch {
+  margin-left: auto;
+}
+
+.file-count {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.mode-alert {
+  margin-bottom: 16px;
+}
+
 .result-card {
   margin-top: 20px;
 }
 
-.success-text { color: #52c41a; }
-.fail-text { color: #f5222d; }
-.skip-text { color: #faad14; }
-.fail-item { color: #f5222d; font-size: 13px; margin: 2px 0; }
+.result-stats {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.failed-list {
+  text-align: left;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.failed-title {
+  font-weight: 600;
+  color: #f5222d;
+  margin-bottom: 4px;
+}
+
+.failed-item {
+  color: #f5222d;
+  font-size: 13px;
+  margin: 2px 0;
+}
 
 .browse-dialog {
   max-height: 400px;

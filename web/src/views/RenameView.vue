@@ -134,10 +134,8 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Edit, Right } from '@element-plus/icons-vue'
 import { renamePreview, renameFiles } from '../api/files'
-import { ElMessage } from 'element-plus'
-import { useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
-const route = useRoute()
 const previewLoading = ref(false)
 const renameLoading = ref(false)
 const previewResult = ref(null)
@@ -161,9 +159,15 @@ const fileList = computed(() => {
 })
 
 onMounted(() => {
-  if (route.query.files) {
-    const files = Array.isArray(route.query.files) ? route.query.files : [route.query.files]
-    filesInput.value = files.join('\n')
+  const stored = sessionStorage.getItem('catch_selected_files')
+  if (stored) {
+    try {
+      const files = JSON.parse(stored)
+      if (Array.isArray(files) && files.length > 0) {
+        filesInput.value = files.join('\n')
+      }
+    } catch {}
+    sessionStorage.removeItem('catch_selected_files')
   }
 })
 
@@ -205,6 +209,24 @@ const handleRename = async () => {
   const paths = getPaths()
   if (paths.length === 0) {
     ElMessage.warning('请输入要重命名的文件路径')
+    return
+  }
+
+  const ruleNames = {
+    prefix: '添加前缀',
+    suffix: '添加后缀',
+    sequence: '序号编号',
+    replace: '替换文本',
+    timestamp: '日期时间戳',
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要对 ${paths.length} 个文件执行"${ruleNames[renameForm.rule] || renameForm.rule}"重命名吗？此操作可通过再次重命名撤销。`,
+      '确认重命名',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
     return
   }
 
