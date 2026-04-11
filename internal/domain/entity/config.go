@@ -27,13 +27,13 @@ type SearchConfig struct {
 }
 
 type AppConfig struct {
-	Version    string        `json:"version"`
-	Server     ServerConfig  `json:"server"`
-	Trash      TrashConfig   `json:"trash"`
-	Security   SecurityConfig `json:"security"`
-	SMTP       SMTPConfig    `json:"smtp"`
-	Favorites  []string      `json:"favorites"`
-	Search     SearchConfig  `json:"search"`
+	Version   string         `json:"version"`
+	Server    ServerConfig   `json:"server"`
+	Trash     TrashConfig    `json:"trash"`
+	Security  SecurityConfig `json:"security"`
+	SMTP      SMTPConfig     `json:"smtp"`
+	Favorites []string       `json:"favorites"`
+	Search    SearchConfig   `json:"search"`
 }
 
 func DefaultAppConfig() *AppConfig {

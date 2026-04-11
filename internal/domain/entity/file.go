@@ -7,13 +7,13 @@ import (
 )
 
 type FileInfo struct {
-	Name         string      `json:"name"`
-	Path         string      `json:"path"`
-	Size         int64       `json:"size"`
-	ModTime      time.Time   `json:"mod_time"`
-	IsDir        bool        `json:"is_dir"`
-	Extension    string      `json:"extension"`
-	Permissions  os.FileMode `json:"permissions"`
+	Name        string      `json:"name"`
+	Path        string      `json:"path"`
+	Size        int64       `json:"size"`
+	ModTime     time.Time   `json:"mod_time"`
+	IsDir       bool        `json:"is_dir"`
+	Extension   string      `json:"extension"`
+	Permissions os.FileMode `json:"permissions"`
 }
 
 func NewFileInfoFromOS(path string, info os.FileInfo) *FileInfo {

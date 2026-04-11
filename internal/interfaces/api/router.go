@@ -2,6 +2,7 @@ package api
 
 import (
 	"catch/internal/application/service"
+
 	"github.com/gin-gonic/gin"
 )
 

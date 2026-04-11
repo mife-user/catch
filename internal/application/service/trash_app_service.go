@@ -2,14 +2,14 @@ package service
 
 import (
 	"catch/internal/application/dto"
-	domainService "catch/internal/domain/service"
 	"catch/internal/domain/repository"
+	domainService "catch/internal/domain/service"
 	"fmt"
 )
 
 type TrashAppService struct {
-	trashRepo    repository.TrashRepository
-	configRepo   repository.ConfigRepository
+	trashRepo      repository.TrashRepository
+	configRepo     repository.ConfigRepository
 	trashDomainSvc *domainService.TrashDomainService
 }
 
@@ -19,8 +19,8 @@ func NewTrashAppService(
 	trashDomainSvc *domainService.TrashDomainService,
 ) *TrashAppService {
 	return &TrashAppService{
-		trashRepo:    trashRepo,
-		configRepo:   configRepo,
+		trashRepo:      trashRepo,
+		configRepo:     configRepo,
 		trashDomainSvc: trashDomainSvc,
 	}
 }

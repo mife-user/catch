@@ -12,10 +12,10 @@ import (
 )
 
 type FileAppService struct {
-	fileRepo      repository.FileRepository
-	configRepo    repository.ConfigRepository
-	trashRepo     repository.TrashRepository
-	fileDomainSvc *service.FileDomainService
+	fileRepo       repository.FileRepository
+	configRepo     repository.ConfigRepository
+	trashRepo      repository.TrashRepository
+	fileDomainSvc  *service.FileDomainService
 	trashDomainSvc *service.TrashDomainService
 }
 
@@ -27,10 +27,10 @@ func NewFileAppService(
 	trashDomainSvc *service.TrashDomainService,
 ) *FileAppService {
 	return &FileAppService{
-		fileRepo:      fileRepo,
-		configRepo:    configRepo,
-		trashRepo:     trashRepo,
-		fileDomainSvc: fileDomainSvc,
+		fileRepo:       fileRepo,
+		configRepo:     configRepo,
+		trashRepo:      trashRepo,
+		fileDomainSvc:  fileDomainSvc,
 		trashDomainSvc: trashDomainSvc,
 	}
 }

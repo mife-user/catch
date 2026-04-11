@@ -3,8 +3,9 @@ package api
 import (
 	"catch/internal/application/dto"
 	"catch/internal/application/service"
-	"github.com/gin-gonic/gin"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 type ConfigHandler struct {

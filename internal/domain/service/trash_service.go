@@ -113,13 +113,13 @@ func (s *TrashDomainService) FormatTrashItem(item *entity.TrashItem) map[string]
 		remaining = 0
 	}
 	return map[string]interface{}{
-		"original_path":    item.OriginalPath,
-		"trash_path":       item.TrashPath,
-		"file_name":        item.FileName,
-		"file_size":        item.FileSize,
-		"deleted_at":       item.DeletedAt.Format("2006-01-02 15:04:05"),
-		"expires_at":       item.ExpiresAt.Format("2006-01-02 15:04:05"),
-		"remaining_days":   int(remaining.Hours() / 24),
-		"is_expired":       item.IsExpired(),
+		"original_path":  item.OriginalPath,
+		"trash_path":     item.TrashPath,
+		"file_name":      item.FileName,
+		"file_size":      item.FileSize,
+		"deleted_at":     item.DeletedAt.Format("2006-01-02 15:04:05"),
+		"expires_at":     item.ExpiresAt.Format("2006-01-02 15:04:05"),
+		"remaining_days": int(remaining.Hours() / 24),
+		"is_expired":     item.IsExpired(),
 	}
 }
