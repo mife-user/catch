@@ -85,6 +85,13 @@
       </el-form>
     </el-card>
 
+    <el-card v-if="opProgress" class="progress-card">
+      <div class="progress-content">
+        <span class="progress-text">正在删除... {{ opProgress.done }} / {{ opProgress.total }}</span>
+      </div>
+      <el-progress :percentage="opProgress.total > 0 ? Math.round(opProgress.done / opProgress.total * 100) : 0" :show-text="true" />
+    </el-card>
+
     <el-card v-if="result" class="result-card">
       <template #header>
         <span>删除结果</span>
@@ -112,7 +119,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { Delete } from '@element-plus/icons-vue'
 import { deleteFiles } from '../api/files'
 import { getConfig } from '../api/config'
@@ -125,6 +132,10 @@ const loading = ref(false)
 const result = ref(null)
 const filesInput = ref('')
 const hasPassword = ref(false)
+const opProgress = ref(null)
+
+let ws = null
+let clientId = ''
 
 const deleteForm = reactive({
   mode: 'recycle',
@@ -135,7 +146,28 @@ const fileList = computed(() => {
   return filesInput.value.split('\n').map(p => p.trim()).filter(p => p)
 })
 
+const connectWebSocket = () => {
+  clientId = 'client_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${window.location.host}/api/ws?client_id=${clientId}`
+  try {
+    ws = new WebSocket(wsUrl)
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type === 'operation_progress') {
+          opProgress.value = msg.payload
+        }
+      } catch {}
+    }
+    ws.onerror = () => {}
+    ws.onclose = () => { ws = null }
+  } catch {}
+}
+
 onMounted(async () => {
+  connectWebSocket()
+
   const stored = sessionStorage.getItem('catch_selected_files')
   if (stored) {
     try {
@@ -151,6 +183,13 @@ onMounted(async () => {
     const config = await getConfig()
     hasPassword.value = config.has_password || false
   } catch {}
+})
+
+onUnmounted(() => {
+  if (ws) {
+    ws.close()
+    ws = null
+  }
 })
 
 const handleDelete = async () => {
@@ -180,7 +219,12 @@ const handleDelete = async () => {
   }
 
   loading.value = true
+  opProgress.value = { operation: 'delete', done: 0, total: paths.length }
   try {
+    const headers = {}
+    if (clientId) {
+      headers['X-Client-ID'] = clientId
+    }
     const data = await deleteFiles({
       paths,
       mode: deleteForm.mode,
@@ -192,6 +236,7 @@ const handleDelete = async () => {
     ElMessage.error(err.message || '删除失败')
   } finally {
     loading.value = false
+    opProgress.value = null
   }
 }
 </script>
@@ -228,6 +273,22 @@ const handleDelete = async () => {
   align-items: center;
   gap: 8px;
   margin-top: 4px;
+}
+
+.progress-card {
+  margin-top: 20px;
+}
+
+.progress-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.progress-text {
+  font-size: 14px;
+  color: #606266;
 }
 
 .result-card {

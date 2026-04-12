@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type FileAppService struct {
@@ -35,7 +36,7 @@ func NewFileAppService(
 	}
 }
 
-func (s *FileAppService) Search(req dto.SearchRequest) (*dto.SearchResponse, error) {
+func (s *FileAppService) Search(req dto.SearchRequest, progressCb entity.ProgressCallback) (*dto.SearchResponse, error) {
 	fileType := entity.FileType(req.FileType)
 	if fileType == "" {
 		fileType = entity.FileTypeAll
@@ -53,7 +54,7 @@ func (s *FileAppService) Search(req dto.SearchRequest) (*dto.SearchResponse, err
 		}
 	}
 
-	files, skipped, err := s.fileDomainSvc.SearchFiles(req.Path, req.Pattern, fileType, req.CustomExts, req.MinSize, req.MaxSize, req.ModAfter, req.ModBefore)
+	files, skipped, err := s.fileDomainSvc.SearchFiles(req.Path, req.Pattern, fileType, req.CustomExts, req.MinSize, req.MaxSize, req.ModAfter, req.ModBefore, progressCb)
 	if err != nil {
 		return nil, fmt.Errorf("文件查找失败: %w", err)
 	}
@@ -79,7 +80,7 @@ func (s *FileAppService) Search(req dto.SearchRequest) (*dto.SearchResponse, err
 	}, nil
 }
 
-func (s *FileAppService) Delete(req dto.DeleteRequest) (*dto.DeleteResponse, error) {
+func (s *FileAppService) Delete(req dto.DeleteRequest, progressCb func(done int, total int)) (*dto.DeleteResponse, error) {
 	config, err := s.configRepo.Load()
 	if err != nil {
 		return nil, fmt.Errorf("无法加载配置: %w", err)
@@ -87,14 +88,18 @@ func (s *FileAppService) Delete(req dto.DeleteRequest) (*dto.DeleteResponse, err
 
 	success := make([]string, 0)
 	failed := make([]string, 0)
+	total := len(req.Paths)
 
 	switch req.Mode {
 	case "recycle":
-		for _, path := range req.Paths {
+		for i, path := range req.Paths {
 			if err := s.fileDomainSvc.MoveToSystemTrash(path); err != nil {
 				failed = append(failed, path+": "+err.Error())
 			} else {
 				success = append(success, path)
+			}
+			if progressCb != nil {
+				progressCb(i+1, total)
 			}
 		}
 
@@ -104,18 +109,27 @@ func (s *FileAppService) Delete(req dto.DeleteRequest) (*dto.DeleteResponse, err
 			return nil, fmt.Errorf("无法获取回收站目录: %w", err)
 		}
 
-		for _, path := range req.Paths {
+		for i, path := range req.Paths {
 			trashPath := s.fileDomainSvc.GenerateTrashPath(trashDir, path)
 			item, err := s.fileDomainSvc.MoveToTrash(path, trashPath, config.Trash.ExpireDays)
 			if err != nil {
 				failed = append(failed, path+": "+err.Error())
+				if progressCb != nil {
+					progressCb(i+1, total)
+				}
 				continue
 			}
 			if err := s.trashRepo.Add(item); err != nil {
 				failed = append(failed, path+": 保存回收站记录失败")
+				if progressCb != nil {
+					progressCb(i+1, total)
+				}
 				continue
 			}
 			success = append(success, path)
+			if progressCb != nil {
+				progressCb(i+1, total)
+			}
 		}
 
 	case "permanent":
@@ -126,11 +140,14 @@ func (s *FileAppService) Delete(req dto.DeleteRequest) (*dto.DeleteResponse, err
 			return nil, fmt.Errorf("安全密码验证失败")
 		}
 
-		for _, path := range req.Paths {
+		for i, path := range req.Paths {
 			if err := s.fileDomainSvc.PermanentDelete(path); err != nil {
 				failed = append(failed, path+": "+err.Error())
 			} else {
 				success = append(success, path)
+			}
+			if progressCb != nil {
+				progressCb(i+1, total)
 			}
 		}
 
@@ -207,47 +224,79 @@ func (s *FileAppService) moveOrCopy(srcPaths []string, dstPath string, conflict 
 	failed := make([]string, 0)
 	skipped := make([]string, 0)
 
-	for _, src := range srcPaths {
-		fileName := filepath.Base(src)
-		dst := filepath.Join(dstPath, fileName)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
-		if _, err := os.Stat(dst); err == nil {
-			switch conflict {
-			case "skip":
-				skipped = append(skipped, src)
-				continue
-			case "rename":
-				ext := filepath.Ext(fileName)
-				base := strings.TrimSuffix(fileName, ext)
-				counter := 1
-				for {
-					dst = filepath.Join(dstPath, fmt.Sprintf("%s_(%d)%s", base, counter, ext))
-					if _, err := os.Stat(dst); os.IsNotExist(err) {
-						break
-					}
-					counter++
-				}
-			case "overwrite":
-				os.Remove(dst)
-			default:
-				skipped = append(skipped, src)
-				continue
-			}
-		}
-
-		var err error
-		if op == "move" {
-			err = s.fileRepo.Move(src, dst)
-		} else {
-			err = s.fileRepo.Copy(src, dst)
-		}
-
-		if err != nil {
-			failed = append(failed, src+": "+err.Error())
-		} else {
-			success = append(success, src)
-		}
+	numWorkers := 4
+	if len(srcPaths) < numWorkers {
+		numWorkers = len(srcPaths)
 	}
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+
+	pathCh := make(chan int, len(srcPaths))
+	for i := range srcPaths {
+		pathCh <- i
+	}
+	close(pathCh)
+
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range pathCh {
+				src := srcPaths[idx]
+				fileName := filepath.Base(src)
+				dst := filepath.Join(dstPath, fileName)
+
+				if _, err := os.Stat(dst); err == nil {
+					switch conflict {
+					case "skip":
+						mu.Lock()
+						skipped = append(skipped, src)
+						mu.Unlock()
+						continue
+					case "rename":
+						ext := filepath.Ext(fileName)
+						base := strings.TrimSuffix(fileName, ext)
+						counter := 1
+						for {
+							dst = filepath.Join(dstPath, fmt.Sprintf("%s_(%d)%s", base, counter, ext))
+							if _, err := os.Stat(dst); os.IsNotExist(err) {
+								break
+							}
+							counter++
+						}
+					case "overwrite":
+						os.Remove(dst)
+					default:
+						mu.Lock()
+						skipped = append(skipped, src)
+						mu.Unlock()
+						continue
+					}
+				}
+
+				var err error
+				if op == "move" {
+					err = s.fileRepo.Move(src, dst)
+				} else {
+					err = s.fileRepo.Copy(src, dst)
+				}
+
+				mu.Lock()
+				if err != nil {
+					failed = append(failed, src+": "+err.Error())
+				} else {
+					success = append(success, src)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+
+	wg.Wait()
 
 	return &dto.MoveResponse{Success: success, Failed: failed, Skipped: skipped}, nil
 }

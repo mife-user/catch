@@ -18,8 +18,8 @@ func NewFileDomainService(fileRepo repository.FileRepository) *FileDomainService
 	return &FileDomainService{fileRepo: fileRepo}
 }
 
-func (s *FileDomainService) SearchFiles(path string, pattern string, fileType entity.FileType, customExts []string, minSize, maxSize int64, modAfter, modBefore string) ([]*entity.FileInfo, []string, error) {
-	return s.fileRepo.Search(path, pattern, fileType, customExts, minSize, maxSize, modAfter, modBefore)
+func (s *FileDomainService) SearchFiles(path string, pattern string, fileType entity.FileType, customExts []string, minSize, maxSize int64, modAfter, modBefore string, progressCb entity.ProgressCallback) ([]*entity.FileInfo, []string, error) {
+	return s.fileRepo.Search(path, pattern, fileType, customExts, minSize, maxSize, modAfter, modBefore, progressCb)
 }
 
 func (s *FileDomainService) MoveToTrash(filePath string, trashPath string, expireDays int) (*entity.TrashItem, error) {

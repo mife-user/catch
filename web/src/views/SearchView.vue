@@ -77,6 +77,14 @@
       </el-form>
     </el-card>
 
+    <el-card v-if="searchProgress" class="progress-card">
+      <div class="progress-content">
+        <el-icon class="progress-icon is-loading"><Loading /></el-icon>
+        <span class="progress-text">正在扫描... 已扫描 {{ searchProgress.scanned }} 个文件，找到 {{ searchProgress.found }} 个匹配</span>
+      </div>
+      <el-progress :percentage="0" :indeterminate="true" :show-text="false" />
+    </el-card>
+
     <el-card v-if="results.length > 0" class="results-card">
       <template #header>
         <div class="card-header">
@@ -94,6 +102,13 @@
 
       <el-table ref="tableRef" :data="results" @selection-change="handleSelectionChange" stripe>
         <el-table-column type="selection" width="55" />
+        <el-table-column label="类型" width="50" align="center">
+          <template #default="{ row }">
+            <el-icon :size="20" :color="getFileIconColor(row.extension)">
+              <component :is="getFileIcon(row.extension)" />
+            </el-icon>
+          </template>
+        </el-table-column>
         <el-table-column prop="name" label="文件名" min-width="200" show-overflow-tooltip />
         <el-table-column prop="path" label="路径" min-width="300" show-overflow-tooltip />
         <el-table-column prop="size" label="大小" width="120">
@@ -102,7 +117,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="mod_time" label="修改时间" width="180" />
-        <el-table-column prop="extension" label="扩展名" width="100" />
+        <el-table-column prop="extension" label="扩展名" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="getExtensionTagType(row.extension)">{{ row.extension || '无' }}</el-tag>
+          </template>
+        </el-table-column>
       </el-table>
 
       <div v-if="skipped.length > 0" class="skipped-info">
@@ -143,8 +162,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick, onMounted } from 'vue'
-import { Search, Folder, FolderOpened } from '@element-plus/icons-vue'
+import { ref, reactive, nextTick, onMounted, onUnmounted } from 'vue'
+import { Search, Folder, FolderOpened, Document, Picture, VideoCamera, Headset, Loading } from '@element-plus/icons-vue'
 import { searchFiles, browsePath as fetchBrowsePath } from '../api/files'
 import { getConfig } from '../api/config'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -159,6 +178,10 @@ const customExtsInput = ref('')
 const tableRef = ref(null)
 const favorites = ref([])
 const selectedFavorite = ref('')
+const searchProgress = ref(null)
+
+let ws = null
+let clientId = ''
 
 const searchForm = reactive({
   path: '',
@@ -176,7 +199,63 @@ const browseItems = ref([])
 const browseCurrentPath = ref('')
 const browseParentPath = ref('')
 
+const documentExts = ['.txt', '.doc', '.docx', '.pdf', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.md', '.rtf']
+const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico', '.tiff']
+const videoExts = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm']
+const audioExts = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a']
+
+const getFileIcon = (ext) => {
+  if (!ext) return Document
+  const lower = ext.toLowerCase()
+  if (documentExts.includes(lower)) return Document
+  if (imageExts.includes(lower)) return Picture
+  if (videoExts.includes(lower)) return VideoCamera
+  if (audioExts.includes(lower)) return Headset
+  return Document
+}
+
+const getFileIconColor = (ext) => {
+  if (!ext) return '#909399'
+  const lower = ext.toLowerCase()
+  if (documentExts.includes(lower)) return '#1890ff'
+  if (imageExts.includes(lower)) return '#52c41a'
+  if (videoExts.includes(lower)) return '#faad14'
+  if (audioExts.includes(lower)) return '#722ed1'
+  return '#909399'
+}
+
+const getExtensionTagType = (ext) => {
+  if (!ext) return 'info'
+  const lower = ext.toLowerCase()
+  if (documentExts.includes(lower)) return 'primary'
+  if (imageExts.includes(lower)) return 'success'
+  if (videoExts.includes(lower)) return 'warning'
+  if (audioExts.includes(lower)) return 'danger'
+  return 'info'
+}
+
+const connectWebSocket = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${window.location.host}/api/ws?client_id=${clientId}`
+  try {
+    ws = new WebSocket(wsUrl)
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type === 'search_progress') {
+          searchProgress.value = msg.payload
+        }
+      } catch {}
+    }
+    ws.onerror = () => {}
+    ws.onclose = () => { ws = null }
+  } catch {}
+}
+
 onMounted(async () => {
+  clientId = 'client_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+  connectWebSocket()
+
   try {
     const config = await getConfig()
     if (config.search?.default_path) {
@@ -186,6 +265,13 @@ onMounted(async () => {
       favorites.value = config.favorites
     }
   } catch {}
+})
+
+onUnmounted(() => {
+  if (ws) {
+    ws.close()
+    ws = null
+  }
 })
 
 const handleFavoriteSelect = (val) => {
@@ -200,6 +286,7 @@ const handleSearch = async () => {
     return
   }
   loading.value = true
+  searchProgress.value = { scanned: 0, found: 0, current_dir: '' }
   try {
     const params = { ...searchForm }
     if (searchForm.file_type === 'custom' && customExtsInput.value) {
@@ -207,6 +294,10 @@ const handleSearch = async () => {
     }
     if (!params.min_size) delete params.min_size
     if (!params.max_size) delete params.max_size
+
+    if (clientId) {
+      params.client_id = clientId
+    }
 
     const data = await searchFiles(params)
     results.value = data.files || []
@@ -216,6 +307,7 @@ const handleSearch = async () => {
     ElMessage.error(err.message || '查找失败')
   } finally {
     loading.value = false
+    searchProgress.value = null
   }
 }
 
@@ -368,6 +460,27 @@ const formatSize = (bytes) => {
   gap: 8px;
 }
 
+.progress-card {
+  margin-bottom: 20px;
+}
+
+.progress-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.progress-icon {
+  font-size: 18px;
+  color: #1890ff;
+}
+
+.progress-text {
+  font-size: 14px;
+  color: #606266;
+}
+
 .skipped-info {
   margin-top: 16px;
 }
@@ -414,5 +527,17 @@ const formatSize = (bytes) => {
   padding: 24px;
   text-align: center;
   color: #909399;
+}
+
+@media (max-width: 768px) {
+  .actions {
+    flex-wrap: wrap;
+  }
+
+  .results-card .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
 }
 </style>

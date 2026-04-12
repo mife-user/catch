@@ -3,6 +3,7 @@ package api
 import (
 	"catch/internal/application/dto"
 	"catch/internal/application/service"
+	"catch/internal/domain/entity"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -10,10 +11,14 @@ import (
 
 type FileHandler struct {
 	fileAppSvc *service.FileAppService
+	hub        *ProgressHub
 }
 
 func NewFileHandler(fileAppSvc *service.FileAppService) *FileHandler {
-	return &FileHandler{fileAppSvc: fileAppSvc}
+	return &FileHandler{
+		fileAppSvc: fileAppSvc,
+		hub:        GetProgressHub(),
+	}
 }
 
 func (h *FileHandler) RegisterRoutes(rg *gin.RouterGroup) {
@@ -42,7 +47,16 @@ func (h *FileHandler) Search(c *gin.Context) {
 		}
 	}
 
-	resp, err := h.fileAppSvc.Search(req)
+	clientID := c.Query("client_id")
+
+	var progressCb entity.ProgressCallback
+	if clientID != "" {
+		progressCb = func(progress entity.SearchProgress) {
+			h.hub.BroadcastSearchProgress(clientID, progress.Scanned, progress.Found, progress.CurrentDir)
+		}
+	}
+
+	resp, err := h.fileAppSvc.Search(req, progressCb)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -68,7 +82,16 @@ func (h *FileHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.fileAppSvc.Delete(req)
+	clientID := c.GetHeader("X-Client-ID")
+
+	var progressCb func(done int, total int)
+	if clientID != "" {
+		progressCb = func(done int, total int) {
+			h.hub.BroadcastOperationProgress(clientID, "delete", done, total)
+		}
+	}
+
+	resp, err := h.fileAppSvc.Delete(req, progressCb)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -7,10 +7,11 @@ import (
 )
 
 type Router struct {
-	fileHandler     *FileHandler
-	configHandler   *ConfigHandler
-	feedbackHandler *FeedbackHandler
-	trashHandler    *TrashHandler
+	fileHandler      *FileHandler
+	configHandler    *ConfigHandler
+	feedbackHandler  *FeedbackHandler
+	trashHandler     *TrashHandler
+	wsHandler        *WebSocketHandler
 }
 
 func NewRouter(
@@ -20,10 +21,11 @@ func NewRouter(
 	trashAppSvc *service.TrashAppService,
 ) *Router {
 	return &Router{
-		fileHandler:     NewFileHandler(fileAppSvc),
-		configHandler:   NewConfigHandler(configAppSvc),
-		feedbackHandler: NewFeedbackHandler(feedbackAppSvc),
-		trashHandler:    NewTrashHandler(trashAppSvc),
+		fileHandler:      NewFileHandler(fileAppSvc),
+		configHandler:    NewConfigHandler(configAppSvc),
+		feedbackHandler:  NewFeedbackHandler(feedbackAppSvc),
+		trashHandler:     NewTrashHandler(trashAppSvc),
+		wsHandler:        NewWebSocketHandler(),
 	}
 }
 
@@ -34,5 +36,6 @@ func (r *Router) Setup(engine *gin.Engine) {
 		r.configHandler.RegisterRoutes(api)
 		r.feedbackHandler.RegisterRoutes(api)
 		r.trashHandler.RegisterRoutes(api)
+		r.wsHandler.RegisterRoutes(api)
 	}
 }
