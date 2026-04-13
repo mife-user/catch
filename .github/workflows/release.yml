@@ -14,7 +14,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v6.0.2
     - name: Build Linux
-      run: go build -o catch ./catch
+      run: go build -o catch ./cmd/catch
     - name: GH Release
       uses: softprops/action-gh-release@v3.0.0
       
