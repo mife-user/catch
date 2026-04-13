@@ -12,6 +12,8 @@ type Router struct {
 	feedbackHandler  *FeedbackHandler
 	trashHandler     *TrashHandler
 	wsHandler        *WebSocketHandler
+	cleanupHandler   *CleanupHandler
+	uninstallHandler *UninstallHandler
 }
 
 func NewRouter(
@@ -19,6 +21,8 @@ func NewRouter(
 	configAppSvc *service.ConfigAppService,
 	feedbackAppSvc *service.FeedbackAppService,
 	trashAppSvc *service.TrashAppService,
+	cleanupAppSvc *service.CleanupAppService,
+	uninstallAppSvc *service.UninstallAppService,
 ) *Router {
 	return &Router{
 		fileHandler:      NewFileHandler(fileAppSvc),
@@ -26,6 +30,8 @@ func NewRouter(
 		feedbackHandler:  NewFeedbackHandler(feedbackAppSvc),
 		trashHandler:     NewTrashHandler(trashAppSvc),
 		wsHandler:        NewWebSocketHandler(),
+		cleanupHandler:   NewCleanupHandler(cleanupAppSvc),
+		uninstallHandler: NewUninstallHandler(uninstallAppSvc),
 	}
 }
 
@@ -37,5 +43,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 		r.feedbackHandler.RegisterRoutes(api)
 		r.trashHandler.RegisterRoutes(api)
 		r.wsHandler.RegisterRoutes(api)
+		r.cleanupHandler.RegisterRoutes(api)
+		r.uninstallHandler.RegisterRoutes(api)
 	}
 }

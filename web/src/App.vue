@@ -3,13 +3,13 @@
     <div v-if="!isWelcome" class="mobile-header">
       <el-button class="hamburger-btn" :icon="Fold" @click="drawerVisible = true" text />
       <h2 class="mobile-title">Catch</h2>
-      <span class="mobile-version">v1.0.0</span>
+      <span class="mobile-version">v1.1.0</span>
     </div>
 
     <el-drawer
       v-model="drawerVisible"
       direction="ltr"
-      :size="220"
+      :size="240"
       :show-close="false"
       :with-header="false"
       class="sidebar-drawer"
@@ -17,36 +17,42 @@
       <div class="sidebar">
         <div class="sidebar-header">
           <h2>Catch</h2>
-          <span class="version">v1.0.0</span>
+          <span class="version">v1.1.0</span>
+        </div>
+        <div class="sidebar-search">
+          <el-input
+            v-model="menuSearch"
+            placeholder="搜索功能..."
+            clearable
+            size="small"
+            prefix-icon="Search"
+          />
         </div>
         <el-menu
           :default-active="activeMenu"
+          :default-openeds="defaultOpeneds"
           class="sidebar-menu"
           @select="handleMenuSelect"
           background-color="#001529"
           text-color="#ffffffa6"
           active-text-color="#ffffff"
         >
-          <el-menu-item index="/search">
-            <el-icon><Search /></el-icon>
-            <span>文件查找</span>
-          </el-menu-item>
-          <el-menu-item index="/delete">
-            <el-icon><Delete /></el-icon>
-            <span>文件删除</span>
-          </el-menu-item>
-          <el-menu-item index="/rename">
-            <el-icon><Edit /></el-icon>
-            <span>文件重命名</span>
-          </el-menu-item>
-          <el-menu-item index="/move">
-            <el-icon><Rank /></el-icon>
-            <span>文件移动</span>
-          </el-menu-item>
-          <el-menu-item index="/copy">
-            <el-icon><CopyDocument /></el-icon>
-            <span>文件复制</span>
-          </el-menu-item>
+          <el-sub-menu index="file-manager">
+            <template #title>
+              <el-icon><Folder /></el-icon>
+              <span>文件管理</span>
+            </template>
+            <el-menu-item v-for="item in filteredFileMenuItems" :key="item.index" :index="item.index">
+              <el-icon><component :is="item.icon" /></el-icon>
+              <span>{{ item.label }}</span>
+              <el-icon
+                v-if="dragEnabled"
+                class="drag-handle"
+                @click.stop
+              ><Rank /></el-icon>
+            </el-menu-item>
+          </el-sub-menu>
+
           <el-menu-item index="/trash">
             <el-icon><Delete /></el-icon>
             <span>回收站</span>
@@ -69,36 +75,42 @@
     <div v-if="!isWelcome" class="sidebar desktop-sidebar">
       <div class="sidebar-header">
         <h2>Catch</h2>
-        <span class="version">v1.0.0</span>
+        <span class="version">v1.1.0</span>
+      </div>
+      <div class="sidebar-search">
+        <el-input
+          v-model="menuSearch"
+          placeholder="搜索功能..."
+          clearable
+          size="small"
+          prefix-icon="Search"
+        />
       </div>
       <el-menu
         :default-active="activeMenu"
+        :default-openeds="defaultOpeneds"
         class="sidebar-menu"
         @select="handleMenuSelect"
         background-color="#001529"
         text-color="#ffffffa6"
         active-text-color="#ffffff"
       >
-        <el-menu-item index="/search">
-          <el-icon><Search /></el-icon>
-          <span>文件查找</span>
-        </el-menu-item>
-        <el-menu-item index="/delete">
-          <el-icon><Delete /></el-icon>
-          <span>文件删除</span>
-        </el-menu-item>
-        <el-menu-item index="/rename">
-          <el-icon><Edit /></el-icon>
-          <span>文件重命名</span>
-        </el-menu-item>
-        <el-menu-item index="/move">
-          <el-icon><Rank /></el-icon>
-          <span>文件移动</span>
-        </el-menu-item>
-        <el-menu-item index="/copy">
-          <el-icon><CopyDocument /></el-icon>
-          <span>文件复制</span>
-        </el-menu-item>
+        <el-sub-menu index="file-manager">
+          <template #title>
+            <el-icon><Folder /></el-icon>
+            <span>文件管理</span>
+          </template>
+          <el-menu-item v-for="item in filteredFileMenuItems" :key="item.index" :index="item.index">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.label }}</span>
+            <el-icon
+              v-if="dragEnabled"
+              class="drag-handle"
+              @click.stop
+            ><Rank /></el-icon>
+          </el-menu-item>
+        </el-sub-menu>
+
         <el-menu-item index="/trash">
           <el-icon><Delete /></el-icon>
           <span>回收站</span>
@@ -126,14 +138,44 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Search, Delete, Edit, Rank, CopyDocument, Setting, Fold } from '@element-plus/icons-vue'
+import {
+  Search, Delete, Edit, Rank, CopyDocument, Setting, Fold, Folder,
+  Brush, Monitor
+} from '@element-plus/icons-vue'
 import { getConfig } from './api/config'
 
 const router = useRouter()
 const route = useRoute()
 const drawerVisible = ref(false)
+const menuSearch = ref('')
+const dragEnabled = ref(true)
 
 const isWelcome = computed(() => route.path === '/welcome')
+
+const defaultFileMenuItems = [
+  { index: '/search', label: '文件查找', icon: Search },
+  { index: '/delete', label: '文件删除', icon: Delete },
+  { index: '/rename', label: '文件重命名', icon: Edit },
+  { index: '/move', label: '文件移动', icon: Rank },
+  { index: '/copy', label: '文件复制', icon: CopyDocument },
+  { index: '/cleanup', label: '文件清理', icon: Brush },
+  { index: '/uninstall', label: '软件卸载', icon: Monitor },
+]
+
+const fileMenuItems = ref([...defaultFileMenuItems])
+
+const filteredFileMenuItems = computed(() => {
+  if (!menuSearch.value) return fileMenuItems.value
+  const kw = menuSearch.value.toLowerCase()
+  return fileMenuItems.value.filter(item => item.label.toLowerCase().includes(kw))
+})
+
+const defaultOpeneds = computed(() => {
+  const filePaths = ['/search', '/delete', '/rename', '/move', '/copy', '/cleanup', '/uninstall']
+  if (filePaths.includes(route.path)) return ['file-manager']
+  if (route.path.startsWith('/settings')) return ['settings']
+  return []
+})
 
 const activeMenu = computed(() => {
   if (route.path === '/move' && route.query.mode === 'copy') {
@@ -156,6 +198,15 @@ onMounted(async () => {
     const config = await getConfig()
     if (config.first_launch) {
       router.replace('/welcome')
+    }
+    if (config.menu_order && Array.isArray(config.menu_order)) {
+      const orderMap = {}
+      config.menu_order.forEach((idx, i) => { orderMap[idx] = i })
+      fileMenuItems.value.sort((a, b) => {
+        const oa = orderMap[a.index] !== undefined ? orderMap[a.index] : 999
+        const ob = orderMap[b.index] !== undefined ? orderMap[b.index] : 999
+        return oa - ob
+      })
     }
   } catch {}
 })
@@ -212,8 +263,8 @@ html, body, #app {
 }
 
 .sidebar {
-  width: 200px;
-  min-width: 200px;
+  width: 220px;
+  min-width: 220px;
   background-color: #001529;
   display: flex;
   flex-direction: column;
@@ -240,6 +291,28 @@ html, body, #app {
   font-size: 12px;
 }
 
+.sidebar-search {
+  padding: 8px 12px;
+  border-bottom: 1px solid #ffffff1a;
+}
+
+.sidebar-search .el-input__wrapper {
+  background-color: #ffffff1a;
+  box-shadow: none;
+}
+
+.sidebar-search .el-input__inner {
+  color: #ffffffd9;
+}
+
+.sidebar-search .el-input__inner::placeholder {
+  color: #ffffff73;
+}
+
+.sidebar-search .el-input__prefix .el-icon {
+  color: #ffffff73;
+}
+
 .sidebar-menu {
   border-right: none;
   flex: 1;
@@ -250,6 +323,18 @@ html, body, #app {
 .sidebar-menu .el-sub-menu__title {
   height: 48px;
   line-height: 48px;
+}
+
+.drag-handle {
+  margin-left: auto;
+  color: #ffffff4d;
+  font-size: 12px;
+  cursor: grab;
+  transition: color 0.2s;
+}
+
+.drag-handle:hover {
+  color: #ffffffa6;
 }
 
 .main-content {
@@ -283,6 +368,10 @@ html, body, #app {
     height: 48px;
   }
 
+  .desktop-sidebar .sidebar-search {
+    display: none;
+  }
+
   .desktop-sidebar .el-menu-item span,
   .desktop-sidebar .el-sub-menu__title span {
     display: none;
@@ -298,6 +387,10 @@ html, body, #app {
     padding: 0 !important;
     justify-content: center;
     min-width: auto;
+  }
+
+  .desktop-sidebar .drag-handle {
+    display: none;
   }
 }
 

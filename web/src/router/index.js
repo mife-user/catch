@@ -11,6 +11,11 @@ const routes = [
     component: () => import('../views/WelcomeView.vue'),
   },
   {
+    path: '/tutorial',
+    name: 'Tutorial',
+    component: () => import('../views/TutorialView.vue'),
+  },
+  {
     path: '/search',
     name: 'Search',
     component: () => import('../views/SearchView.vue'),
@@ -34,6 +39,16 @@ const routes = [
     path: '/trash',
     name: 'Trash',
     component: () => import('../views/TrashView.vue'),
+  },
+  {
+    path: '/cleanup',
+    name: 'Cleanup',
+    component: () => import('../views/CleanupView.vue'),
+  },
+  {
+    path: '/uninstall',
+    name: 'Uninstall',
+    component: () => import('../views/UninstallView.vue'),
   },
   {
     path: '/settings/basic',

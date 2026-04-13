@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	fmt.Println("Catch 文件整理工具 v1.0.0")
+	fmt.Println("Catch 文件整理工具 v1.1.0")
 	fmt.Println("===============================")
 	fmt.Println("正在启动服务...")
 
@@ -38,6 +38,8 @@ func main() {
 	fileAppSvc := service.NewFileAppService(fileRepo, configRepo, trashRepo, fileDomainSvc, trashDomainSvc)
 	feedbackAppSvc := service.NewFeedbackAppService(configRepo)
 	trashAppSvc := service.NewTrashAppService(trashRepo, configRepo, trashDomainSvc)
+	cleanupAppSvc := service.NewCleanupAppService()
+	uninstallAppSvc := service.NewUninstallAppService()
 
 	if err := trashDomainSvc.StartupCleanup(); err != nil {
 		fmt.Printf("启动清理过期文件失败: %v\n", err)
@@ -53,7 +55,7 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.Default()
 
-	router := api.NewRouter(fileAppSvc, configAppSvc, feedbackAppSvc, trashAppSvc)
+	router := api.NewRouter(fileAppSvc, configAppSvc, feedbackAppSvc, trashAppSvc, cleanupAppSvc, uninstallAppSvc)
 	router.Setup(engine)
 
 	staticPath := findStaticFiles()
