@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
-      with: actions/checkout@v6
+      uses: actions/checkout@v6.0.2
     - name: Build
       run: go build 
     - name: GH Release
