@@ -13,8 +13,8 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v6.0.2
-    - name: Build
-      run: go build -o catch ./catch/main.go
+    - name: Build Linux
+      run: go build -o catch ./catch
     - name: GH Release
       uses: softprops/action-gh-release@v3.0.0
       
